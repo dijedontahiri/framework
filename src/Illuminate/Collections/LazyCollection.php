@@ -542,7 +542,7 @@ class LazyCollection implements CanBeEscapedWhenCastToString, Enumerable
         }
 
         foreach ($this as $outerKey => $outerValue) {
-            if ($outerKey == $key) {
+            if ($outerKey === $key) {
                 return $outerValue;
             }
         }
