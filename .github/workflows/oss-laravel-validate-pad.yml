@@ -1,0 +1,67 @@
+name: OSS Laravel validate lazy pad baseline
+
+on:
+  push:
+    branches:
+      - automation/laravel-validation
+
+permissions:
+  contents: read
+
+jobs:
+  lazy-pad-baseline:
+    if: github.repository == 'dijedontahiri/framework'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CANDIDATE_SHA: b590575cf07bd3c440cd50c148284c211851853b
+      BASE_SHA: 1d9727160ad440d1ccf2fdcbb7e4f4f36efae212
+    steps:
+      - name: Checkout exact test-only candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 2
+
+      - name: Verify test-only tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git rev-parse HEAD~1)" = "$BASE_SHA"
+          mapfile -t files < <(git diff --name-only "$BASE_SHA..$CANDIDATE_SHA")
+          printf '%s\n' "${files[@]}"
+          test "${#files[@]}" -eq 1
+          test "${files[0]}" = "tests/Support/SupportLazyCollectionPadTest.php"
+          git diff --check "$BASE_SHA..$CANDIDATE_SHA"
+
+      - name: Show current pad implementation
+        run: grep -n -A35 -B5 'public function pad' src/Illuminate/Collections/LazyCollection.php
+
+      - name: Set up PHP and Composer
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+          tools: composer:v2
+
+      - name: Record runtime
+        run: |
+          git rev-parse HEAD
+          php -v
+          composer --version
+
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Prove focused regression fails for sparse numeric keys
+        shell: bash
+        run: |
+          set +e
+          vendor/bin/phpunit tests/Support/SupportLazyCollectionPadTest.php > /tmp/phpunit.out 2>&1
+          status=$?
+          set -e
+          cat /tmp/phpunit.out
+          test "$status" -ne 0
+          grep -F "Failed asserting that two arrays are identical" /tmp/phpunit.out
+          grep -F "SupportLazyCollectionPadTest" /tmp/phpunit.out
