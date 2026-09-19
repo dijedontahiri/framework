@@ -42,32 +42,31 @@ jobs:
 
           path = Path('src/Illuminate/Collections/LazyCollection.php')
           text = path.read_text()
-
-          short_values = """                if (! $values->valid()) {
-                    trigger_error($errorMessage, E_USER_WARNING);
-
-                    break;
-                }
-"""
-          short_values_fix = """                if (! $values->valid()) {
-                    throw new \\ValueError($errorMessage);
-                }
-"""
-          extra_values = """            if ($values->valid()) {
-                trigger_error($errorMessage, E_USER_WARNING);
-            }
-"""
-          extra_values_fix = """            if ($values->valid()) {
-                throw new \\ValueError($errorMessage);
-            }
-"""
-
+          short_values = (
+              "                if (! $values->valid()) {\n"
+              "                    trigger_error($errorMessage, E_USER_WARNING);\n"
+              "\n"
+              "                    break;\n"
+              "                }\n"
+          )
+          short_values_fix = (
+              "                if (! $values->valid()) {\n"
+              "                    throw new \\ValueError($errorMessage);\n"
+              "                }\n"
+          )
+          extra_values = (
+              "            if ($values->valid()) {\n"
+              "                trigger_error($errorMessage, E_USER_WARNING);\n"
+              "            }\n"
+          )
+          extra_values_fix = (
+              "            if ($values->valid()) {\n"
+              "                throw new \\ValueError($errorMessage);\n"
+              "            }\n"
+          )
           if text.count(short_values) != 1 or text.count(extra_values) != 1:
               raise SystemExit('expected combine mismatch guards not found exactly once')
-
-          text = text.replace(short_values, short_values_fix, 1)
-          text = text.replace(extra_values, extra_values_fix, 1)
-          path.write_text(text)
+          path.write_text(text.replace(short_values, short_values_fix, 1).replace(extra_values, extra_values_fix, 1))
           PY
           test "$(git diff --name-only | wc -l)" -eq 1
           test "$(git diff --name-only)" = "src/Illuminate/Collections/LazyCollection.php"
