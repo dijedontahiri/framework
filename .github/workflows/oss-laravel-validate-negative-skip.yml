@@ -1,0 +1,39 @@
+name: OSS Laravel validate negative lazy skip
+
+on:
+  push:
+    branches:
+      - automation/laravel-validate-negative-skip
+
+permissions:
+  contents: read
+
+jobs:
+  baseline:
+    if: github.repository == 'dijedontahiri/framework'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 892418206a333f79edff2a25cda61950a36e53fb
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+          tools: composer:v2
+      - name: Verify exact baseline
+        run: test "$(git rev-parse HEAD)" = "892418206a333f79edff2a25cda61950a36e53fb"
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+      - name: Prove regression fails
+        shell: bash
+        run: |
+          set +e
+          vendor/bin/phpunit tests/Support/SupportLazyCollectionSkipTest.php > /tmp/result.log 2>&1
+          status=$?
+          cat /tmp/result.log
+          test "$status" -ne 0
+          grep -q "Failed asserting that two arrays are identical" /tmp/result.log
