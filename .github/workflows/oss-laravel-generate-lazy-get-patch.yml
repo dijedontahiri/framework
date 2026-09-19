@@ -1,0 +1,48 @@
+name: Generate lazy collection get key comparison patch
+
+on:
+  push:
+    branches:
+      - automation/generate-lazy-collection-get-key-comparison
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    if: github.repository == 'dijedontahiri/framework'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout test-only candidate
+        uses: actions/checkout@v4
+        with:
+          ref: 4fc82e7a4ae690998d2a4a7ee0f4295dbaf3f411
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Apply minimal source correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "4fc82e7a4ae690998d2a4a7ee0f4295dbaf3f411"
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('src/Illuminate/Collections/LazyCollection.php')
+          text = path.read_text()
+          old = '            if ($outerKey == $key) {\n'
+          new = '            if ($outerKey === $key) {\n'
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f'expected exactly one target, found {count}')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          git diff --check
+          git diff -- src/Illuminate/Collections/LazyCollection.php
+          test "$(git diff --numstat -- src/Illuminate/Collections/LazyCollection.php)" = $'1\t1\tsrc/Illuminate/Collections/LazyCollection.php'
+      - name: Upload corrected source
+        uses: actions/upload-artifact@v4
+        with:
+          name: lazy-collection-get-source
+          path: src/Illuminate/Collections/LazyCollection.php
+          if-no-files-found: error
+          retention-days: 1
