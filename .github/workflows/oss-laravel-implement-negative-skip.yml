@@ -1,0 +1,66 @@
+name: OSS Laravel implement negative lazy skip
+
+on:
+  push:
+    branches:
+      - automation/laravel-implement-negative-skip
+
+permissions:
+  contents: write
+
+jobs:
+  implement:
+    if: github.repository == 'dijedontahiri/framework'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: automation/fix-lazy-collection-negative-skip
+          fetch-depth: 1
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+          tools: composer:v2
+      - name: Verify candidate ownership and baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "892418206a333f79edff2a25cda61950a36e53fb"
+          test "$(git branch --show-current)" = "automation/fix-lazy-collection-negative-skip"
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+      - name: Apply minimal correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('src/Illuminate/Collections/LazyCollection.php')
+          text = path.read_text()
+          old = '''    public function skip($count)\n    {\n        return new static(function () use ($count) {\n'''
+          new = '''    public function skip($count)\n    {\n        if ($count < 0) {\n            return $this->passthru(__FUNCTION__, func_get_args());\n        }\n\n        return new static(function () use ($count) {\n'''
+          if text.count(old) != 1:
+              raise SystemExit('expected skip implementation anchor not found exactly once')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          test "$(git diff --name-only)" = "src/Illuminate/Collections/LazyCollection.php"
+      - name: Validate corrected tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          vendor/bin/phpunit tests/Support/SupportLazyCollectionSkipTest.php
+          vendor/bin/phpunit tests/Support/SupportCollectionTest.php --filter Skip
+          vendor/bin/phpunit tests/Support/SupportLazyCollectionIsLazyTest.php --filter Skip
+          vendor/bin/pint --test src/Illuminate/Collections/LazyCollection.php tests/Support/SupportLazyCollectionSkipTest.php
+      - name: Commit and push exact verified tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git diff --name-only)" = "src/Illuminate/Collections/LazyCollection.php"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/Illuminate/Collections/LazyCollection.php
+          git commit -m 'fix: handle negative lazy collection skip'
+          git push origin HEAD:automation/fix-lazy-collection-negative-skip
