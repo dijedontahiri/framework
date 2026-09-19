@@ -1,0 +1,130 @@
+name: OSS Laravel collection edge parity probe
+
+on:
+  push:
+    branches:
+      - automation/laravel-validation
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    if: github.repository == 'dijedontahiri/framework'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout inspected upstream source
+        uses: actions/checkout@v4
+        with:
+          ref: 1d9727160ad440d1ccf2fdcbb7e4f4f36efae212
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+          tools: composer:v2
+      - name: Record runtime
+        run: |
+          test "$(git rev-parse HEAD)" = "1d9727160ad440d1ccf2fdcbb7e4f4f36efae212"
+          php -v
+          composer --version
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+      - name: Run deterministic edge parity probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/probe.php <<'PHP'
+          <?php
+          require 'vendor/autoload.php';
+
+          use Illuminate\Support\Collection;
+          use Illuminate\Support\Enumerable;
+          use Illuminate\Support\LazyCollection;
+
+          $normalise = static function ($value) use (&$normalise) {
+              if ($value instanceof Enumerable) {
+                  $value = $value->all();
+              }
+              if (is_array($value)) {
+                  foreach ($value as $key => $item) {
+                      $value[$key] = $normalise($item);
+                  }
+              }
+              return $value;
+          };
+
+          $compare = static function (string $label, array $items, callable $call) use ($normalise): ?array {
+              $results = [];
+              foreach ([Collection::class, LazyCollection::class] as $class) {
+                  try {
+                      $results[] = ['ok', $normalise($call(new $class($items)))];
+                  } catch (Throwable $e) {
+                      $results[] = ['exception', get_class($e), $e->getMessage()];
+                  }
+              }
+              return $results[0] === $results[1] ? null : compact('label', 'items', 'results');
+          };
+
+          $cases = [
+              [],
+              [1],
+              [1, 2, 3, 4, 5],
+              [2 => 'a', 5 => 'b', 9 => 'c'],
+              ['a' => 1, 'b' => 2, 'c' => 3],
+              ['a' => 1, 0 => 2, 'b' => 3, 7 => 4],
+              [0, false, null, '', '0', 1],
+          ];
+
+          $mismatches = [];
+          $record = static function ($result) use (&$mismatches) {
+              if ($result !== null) $mismatches[] = $result;
+          };
+
+          foreach ($cases as $items) {
+              foreach ([[-7, null], [-3, null], [-1, null], [0, null], [1, null], [2, null], [7, null], [-3, 2], [1, 2], [1, 20]] as [$offset, $length]) {
+                  $record($compare("slice:$offset:".($length ?? 'null'), $items, fn ($c) => $c->slice($offset, $length)));
+              }
+              foreach ([[1,0], [1,2], [2,0], [2,1], [3,2], [7,0]] as [$step, $offset]) {
+                  $record($compare("nth:$step:$offset", $items, fn ($c) => $c->nth($step, $offset)));
+              }
+              foreach ([1, 2, 3, 7] as $size) {
+                  $record($compare("chunk:$size", $items, fn ($c) => $c->chunk($size)));
+                  $record($compare("split:$size", $items, fn ($c) => $c->split($size)));
+                  $record($compare("splitIn:$size", $items, fn ($c) => $c->splitIn($size)));
+              }
+              foreach ([[2,1],[2,2],[3,1],[3,2]] as [$size,$step]) {
+                  $record($compare("sliding:$size:$step", $items, fn ($c) => $c->sliding($size, $step)));
+              }
+              $record($compare('reverse', $items, fn ($c) => $c->reverse()));
+              $record($compare('flatten:1', $items, fn ($c) => $c->flatten(1)));
+              $record($compare('flatten:INF', $items, fn ($c) => $c->flatten()));
+              $record($compare('keys', $items, fn ($c) => $c->keys()));
+              $record($compare('values', $items, fn ($c) => $c->values()));
+              $record($compare('sort', $items, fn ($c) => $c->sort()));
+              $record($compare('sortDesc', $items, fn ($c) => $c->sortDesc()));
+              $record($compare('sortBy', $items, fn ($c) => $c->sortBy(fn ($v) => is_scalar($v) ? (string) $v : '')));
+              $record($compare('filter', $items, fn ($c) => $c->filter()));
+              $record($compare('where-not-null', $items, fn ($c) => $c->whereNotNull()));
+              $record($compare('where-in-loose', $items, fn ($c) => $c->whereIn(null, [0, '0', 2])));
+              $record($compare('where-in-strict', $items, fn ($c) => $c->whereInStrict(null, [0, '0', 2])));
+              $record($compare('zip', $items, fn ($c) => $c->zip(['x','y','z'])));
+              $record($compare('crossJoin', $items, fn ($c) => $c->crossJoin(['x','y'])));
+          }
+
+          foreach ([
+              [[['a' => 1], ['b' => 2]]],
+              [[1, 2], [3, 4]],
+              [new Collection(['a' => 1]), ['b' => 2]],
+          ] as $items) {
+              $record($compare('collapseWithKeys', $items, fn ($c) => $c->collapseWithKeys()));
+          }
+
+          echo json_encode($mismatches, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), PHP_EOL;
+          echo 'MISMATCH_COUNT=', count($mismatches), PHP_EOL;
+          if ($mismatches !== []) exit(3);
+          PHP
+          php /tmp/probe.php
