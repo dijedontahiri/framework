@@ -1,0 +1,97 @@
+name: OSS Laravel collection semantic probe R6
+
+on:
+  push:
+    branches:
+      - automation/laravel-semantic-probe-r6
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    if: github.repository == 'dijedontahiri/framework'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 1d9727160ad440d1ccf2fdcbb7e4f4f36efae212
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+          tools: composer:v2
+      - name: Verify exact source
+        run: test "$(git rev-parse HEAD)" = "1d9727160ad440d1ccf2fdcbb7e4f4f36efae212"
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+      - name: Differential keyed edge probe
+        shell: bash
+        run: |
+          cat > /tmp/probe.php <<'PHP'
+          <?php
+          require 'vendor/autoload.php';
+          use Illuminate\Support\Collection;
+          use Illuminate\Support\Enumerable;
+          use Illuminate\Support\LazyCollection;
+          function norm($v) {
+              if ($v instanceof Enumerable) return ['collection', norm($v->all())];
+              if (is_array($v)) { $r=[]; foreach($v as $k=>$x)$r[$k]=norm($x); return $r; }
+              if (is_object($v)) return ['object',get_class($v),get_object_vars($v)];
+              return [gettype($v),$v];
+          }
+          function out(callable $f){try{return ['ok',norm($f())];}catch(Throwable $e){return ['throw',get_class($e),$e->getMessage()];}}
+          function cmp(&$m,$label,$items,callable $f){$a=out(fn()=>$f(new Collection($items)));$b=out(fn()=>$f(new LazyCollection($items)));if($a!==$b)$m[]=[$label,$a,$b];}
+          $m=[];
+          $keyed=[2=>'a',5=>'b','x'=>'c',10=>'d','y'=>'e'];
+          $nums=[2=>10,5=>20,'x'=>30,10=>40,'y'=>50];
+          $cases=[
+            'chunk2'=>fn($c)=>$c->chunk(2),
+            'chunk3'=>fn($c)=>$c->chunk(3),
+            'split2'=>fn($c)=>$c->split(2),
+            'split3'=>fn($c)=>$c->split(3),
+            'splitIn2'=>fn($c)=>$c->splitIn(2),
+            'splitIn3'=>fn($c)=>$c->splitIn(3),
+            'sliding2'=>fn($c)=>$c->sliding(2),
+            'sliding3step2'=>fn($c)=>$c->sliding(3,2),
+            'slice-3'=>fn($c)=>$c->slice(-3),
+            'slice-4-2'=>fn($c)=>$c->slice(-4,2),
+            'take3'=>fn($c)=>$c->take(3),
+            'take-3'=>fn($c)=>$c->take(-3),
+            'skip2'=>fn($c)=>$c->skip(2),
+            'nth2'=>fn($c)=>$c->nth(2),
+            'nth2-1'=>fn($c)=>$c->nth(2,1),
+            'forPage2'=>fn($c)=>$c->forPage(2,2),
+            'partition'=>fn($c)=>$c->partition(fn($v,$k)=>is_int($k)),
+            'sortKeys'=>fn($c)=>$c->sortKeys(),
+            'sortKeysDesc'=>fn($c)=>$c->sortKeysDesc(),
+            'sortKeysUsing'=>fn($c)=>$c->sortKeysUsing(fn($a,$b)=>strcmp((string)$a,(string)$b)),
+            'reverse'=>fn($c)=>$c->reverse(),
+            'every'=>fn($c)=>$c->every(fn($v,$k)=>is_string($v)),
+            'firstWhere'=>fn($c)=>$c->firstWhere(fn($v)=>$v==='c'),
+            'last'=>fn($c)=>$c->last(),
+          ];
+          foreach($cases as $n=>$f)cmp($m,'keyed/'.$n,$keyed,$f);
+          $numCases=[
+            'chunkWhile'=>fn($c)=>$c->chunkWhile(fn($v,$k,$chunk)=>$chunk->sum()+$v<60),
+            'percentage'=>fn($c)=>$c->percentage(fn($v)=>$v>=30),
+            'reduce'=>fn($c)=>$c->reduce(fn($carry,$v,$k)=>[$carry[0]+$v,$carry[1].'|'.$k],[0,'']),
+            'reduceSpread'=>fn($c)=>$c->reduceSpread(fn($sum,$count,$v)=>[$sum+$v,$count+1],0,0),
+            'median'=>fn($c)=>$c->median(),
+            'mode'=>fn($c)=>$c->mode(),
+            'min'=>fn($c)=>$c->min(),
+            'max'=>fn($c)=>$c->max(),
+          ];
+          foreach($numCases as $n=>$f)cmp($m,'nums/'.$n,$nums,$f);
+          foreach([
+            ['zip-short',fn($c)=>$c->zip([1,2])],
+            ['zip-long',fn($c)=>$c->zip([1,2,3,4,5,6,7])],
+            ['crossJoin',fn($c)=>$c->crossJoin(['X','Y'])],
+          ] as [$n,$f])cmp($m,'keyed/'.$n,$keyed,$f);
+          echo 'MISMATCH_COUNT='.count($m).PHP_EOL;
+          foreach($m as $x)echo json_encode($x,JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE).PHP_EOL;
+          PHP
+          php /tmp/probe.php
