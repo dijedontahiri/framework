@@ -1,0 +1,56 @@
+name: Validate lazy collection get key comparison final
+
+on:
+  push:
+    branches:
+      - automation/validate-lazy-collection-get-key-comparison-final
+
+permissions:
+  contents: read
+
+jobs:
+  final:
+    if: github.repository == 'dijedontahiri/framework'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.3', '8.4']
+    steps:
+      - name: Checkout exact final candidate
+        uses: actions/checkout@v4
+        with:
+          ref: 28f795c8235f32c06e97ef00e8ec17f375e64fed
+          fetch-depth: 3
+          persist-credentials: false
+      - name: Verify exact tested identities and isolated diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "28f795c8235f32c06e97ef00e8ec17f375e64fed"
+          test "$(git rev-parse HEAD^)" = "4fc82e7a4ae690998d2a4a7ee0f4295dbaf3f411"
+          test "$(git rev-parse HEAD^^)" = "1d9727160ad440d1ccf2fdcbb7e4f4f36efae212"
+          mapfile -t files < <(git diff --name-only 1d9727160ad440d1ccf2fdcbb7e4f4f36efae212 HEAD | sort)
+          printf '%s\n' "${files[@]}"
+          test "${#files[@]}" -eq 2
+          test "${files[0]}" = "src/Illuminate/Collections/LazyCollection.php"
+          test "${files[1]}" = "tests/Support/SupportLazyCollectionGetTest.php"
+          git diff --check 1d9727160ad440d1ccf2fdcbb7e4f4f36efae212 HEAD
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+          tools: composer:v2
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+      - name: Run final verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          php -v
+          composer --version
+          vendor/bin/phpunit tests/Support/SupportLazyCollectionGetTest.php
+          vendor/bin/phpunit tests/Support/SupportLazyCollectionTest.php
+          vendor/bin/pint --test src/Illuminate/Collections/LazyCollection.php tests/Support/SupportLazyCollectionGetTest.php
