@@ -9,15 +9,15 @@ permissions:
   contents: read
 
 jobs:
-  differential-collections:
+  lazy-collection-combine:
     if: github.repository == 'dijedontahiri/framework'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: Checkout inspected Laravel source
+      - name: Checkout exact candidate
         uses: actions/checkout@v4
         with:
-          ref: 1d9727160ad440d1ccf2fdcbb7e4f4f36efae212
+          ref: 05584e6af46efb31819cf002f621484eb58d8beb
           fetch-depth: 1
 
       - name: Set up PHP
@@ -27,127 +27,14 @@ jobs:
           coverage: none
           tools: composer:v2
 
-      - name: Record runtime
+      - name: Record runtime and source
         run: |
+          git rev-parse HEAD
           php -v
           composer --version
 
       - name: Install dependencies
         run: composer install --no-interaction --no-progress --prefer-dist
 
-      - name: Collection set-operation differential probe
-        shell: bash
-        run: |
-          cat > /tmp/collection_probe.php <<'PHP'
-          <?php
-          require 'vendor/autoload.php';
-
-          use Illuminate\Support\Collection;
-          use Illuminate\Support\Enumerable;
-          use Illuminate\Support\LazyCollection;
-
-          $normalise = static function ($value) use (&$normalise) {
-              if ($value instanceof Enumerable) {
-                  $value = $value->all();
-              }
-              if (is_array($value)) {
-                  foreach ($value as $key => $item) {
-                      $value[$key] = $normalise($item);
-                  }
-              }
-              if (is_object($value)) {
-                  return ['__class' => get_class($value), '__vars' => get_object_vars($value)];
-              }
-              return $value;
-          };
-
-          $compare = static function (string $label, array $items, callable $call) use ($normalise): ?array {
-              $results = [];
-              foreach ([Collection::class, LazyCollection::class] as $class) {
-                  try {
-                      $results[] = ['ok', $normalise($call(new $class($items)))];
-                  } catch (\Throwable $e) {
-                      $results[] = ['exception', get_class($e), $e->getMessage()];
-                  }
-              }
-              return $results[0] === $results[1] ? null : compact('label', 'items', 'results');
-          };
-
-          $mismatches = [];
-          $record = static function ($value) use (&$mismatches) {
-              if ($value !== null) {
-                  $mismatches[] = $value;
-              }
-          };
-
-          $cases = [
-              [],
-              [1],
-              [1, 2, 3],
-              [1, 1, 2, 3, 2],
-              [0, false, null, '', '0', 1],
-              ['a' => 1, 'b' => 2, 'c' => 3],
-              ['a' => 1, 0 => 2, 'b' => 3, 1 => 4],
-              ['x' => '10', 'y' => 10, 'z' => '2', 'w' => 2],
-          ];
-
-          $others = [
-              [], [2, 3, 4], [1, '1', null],
-              ['a' => 9, 'd' => 4],
-              ['x' => 10, 'q' => 99],
-          ];
-
-          foreach ($cases as $items) {
-              foreach ($others as $other) {
-                  $calls = [
-                      'concat' => fn ($c) => $c->concat($other),
-                      'merge' => fn ($c) => $c->merge($other),
-                      'mergeRecursive' => fn ($c) => $c->mergeRecursive($other),
-                      'union' => fn ($c) => $c->union($other),
-                      'replace' => fn ($c) => $c->replace($other),
-                      'replaceRecursive' => fn ($c) => $c->replaceRecursive($other),
-                      'diff' => fn ($c) => $c->diff($other),
-                      'diffAssoc' => fn ($c) => $c->diffAssoc($other),
-                      'diffKeys' => fn ($c) => $c->diffKeys($other),
-                      'intersect' => fn ($c) => $c->intersect($other),
-                      'intersectAssoc' => fn ($c) => $c->intersectAssoc($other),
-                      'intersectByKeys' => fn ($c) => $c->intersectByKeys($other),
-                  ];
-                  foreach ($calls as $label => $call) {
-                      $record($compare($label.':'.json_encode($other), $items, $call));
-                  }
-              }
-
-              foreach ([1, 2, 3, 5] as $size) {
-                  $record($compare("chunk:$size", $items, fn ($c) => $c->chunk($size)));
-                  $record($compare("split:$size", $items, fn ($c) => $c->split($size)));
-                  $record($compare("splitIn:$size", $items, fn ($c) => $c->splitIn($size)));
-                  foreach ([1, 2, 3] as $step) {
-                      $record($compare("sliding:$size:$step", $items, fn ($c) => $c->sliding($size, $step)));
-                  }
-              }
-
-              $record($compare('zip:a-b-c-d', $items, fn ($c) => $c->zip(['a', 'b', 'c', 'd'])));
-              $record($compare('crossJoin:x-y', $items, fn ($c) => $c->crossJoin(['x', 'y'])));
-              $record($compare('except:a-1', $items, fn ($c) => $c->except(['a', 1])));
-              $record($compare('only:a-1', $items, fn ($c) => $c->only(['a', 1])));
-              $record($compare('flip', $items, fn ($c) => $c->flip()));
-          }
-
-          foreach ([
-              ['keys' => ['a', 'b', 'c'], 'values' => [1, 2, 3]],
-              ['keys' => [1, 2, 3], 'values' => ['a', 'b', 'c']],
-              ['keys' => ['a', 'a'], 'values' => [1, 2]],
-              ['keys' => ['a'], 'values' => [1, 2]],
-          ] as $case) {
-              $record($compare('combine:'.json_encode($case['values']), $case['keys'], fn ($c) => $c->combine($case['values'])));
-          }
-
-          echo json_encode($mismatches, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), PHP_EOL;
-          echo 'MISMATCH_COUNT=', count($mismatches), PHP_EOL;
-          if ($mismatches !== []) {
-              exit(3);
-          }
-          PHP
-
-          php /tmp/collection_probe.php
+      - name: Run combine regression
+        run: vendor/bin/phpunit tests/Support/SupportLazyCollectionCombineTest.php
