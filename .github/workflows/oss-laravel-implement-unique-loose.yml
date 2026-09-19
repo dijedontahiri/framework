@@ -1,0 +1,66 @@
+name: OSS Laravel implement lazy unique semantics
+
+on:
+  push:
+    branches:
+      - automation/laravel-implement-unique-loose
+
+permissions:
+  contents: write
+
+jobs:
+  implement:
+    if: github.repository == 'dijedontahiri/framework'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: automation/fix-lazy-collection-unique-loose-semantics
+          fetch-depth: 1
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+          tools: composer:v2
+      - name: Verify candidate ownership and baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "3d10db690b23e3fc8edebb8ef0dc73c1b8917168"
+          test "$(git branch --show-current)" = "automation/fix-lazy-collection-unique-loose-semantics"
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+      - name: Apply minimal correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('src/Illuminate/Collections/LazyCollection.php')
+          text = path.read_text()
+          old = '''    public function unique($key = null, $strict = false)\n    {\n        $callback = $this->valueRetriever($key);\n'''
+          new = '''    public function unique($key = null, $strict = false)\n    {\n        if (is_null($key) && $strict === false) {\n            return $this->passthru(__FUNCTION__, func_get_args());\n        }\n\n        $callback = $this->valueRetriever($key);\n'''
+          if text.count(old) != 1:
+              raise SystemExit('expected unique implementation anchor not found exactly once')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          test "$(git diff --name-only)" = "src/Illuminate/Collections/LazyCollection.php"
+      - name: Validate corrected tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          vendor/bin/phpunit tests/Support/SupportLazyCollectionUniqueTest.php
+          vendor/bin/phpunit tests/Support/SupportCollectionTest.php --filter Unique
+          vendor/bin/phpunit tests/Support/SupportLazyCollectionIsLazyTest.php --filter Unique
+          vendor/bin/pint --test src/Illuminate/Collections/LazyCollection.php tests/Support/SupportLazyCollectionUniqueTest.php
+      - name: Commit and push exact verified tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git diff --name-only)" = "src/Illuminate/Collections/LazyCollection.php"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/Illuminate/Collections/LazyCollection.php
+          git commit -m 'fix: align lazy collection unique semantics'
+          git push origin HEAD:automation/fix-lazy-collection-unique-loose-semantics
