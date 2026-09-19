@@ -1,0 +1,126 @@
+name: OSS Laravel prepare concat key fix
+
+on:
+  push:
+    branches:
+      - automation/laravel-validation
+
+permissions:
+  contents: write
+
+jobs:
+  prepare-lazy-concat:
+    if: github.repository == 'dijedontahiri/framework'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      EXPECTED_SOURCE_SHA: 4b9195346ddf2f9f6c1e6f43f98d393dd87074bf
+      BASE_SHA: 1d9727160ad440d1ccf2fdcbb7e4f4f36efae212
+      TARGET_BRANCH: automation/fix-lazy-collection-concat-keys
+    steps:
+      - name: Checkout exact test-only preparation source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_SOURCE_SHA }}
+          fetch-depth: 3
+          persist-credentials: true
+
+      - name: Verify immutable source and branch ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
+          test "$(git rev-parse HEAD~1)" = "$BASE_SHA"
+          git fetch --no-tags origin "refs/heads/$TARGET_BRANCH:refs/remotes/origin/candidate"
+          test "$(git rev-parse refs/remotes/origin/candidate)" = "$EXPECTED_SOURCE_SHA"
+          mapfile -t files < <(git diff --name-only "$BASE_SHA..$EXPECTED_SOURCE_SHA")
+          test "${#files[@]}" -eq 1
+          test "${files[0]}" = "tests/Support/SupportLazyCollectionConcatKeysTest.php"
+          git diff --check "$BASE_SHA..$EXPECTED_SOURCE_SHA"
+
+      - name: Apply minimal lazy concat key correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/Illuminate/Collections/LazyCollection.php')
+          text = path.read_text()
+          before = '''    public function concat($source)\n    {\n        return (new static(function () use ($source) {\n            yield from $this;\n            yield from $source;\n        }))->values();\n    }\n'''
+          after = '''    public function concat($source)\n    {\n        return new static(function () use ($source) {\n            $lastNumericKey = null;\n\n            foreach ($this as $key => $value) {\n                yield $key => $value;\n\n                if (is_int($key) && (is_null($lastNumericKey) || $key > $lastNumericKey)) {\n                    $lastNumericKey = $key;\n                }\n            }\n\n            $key = is_null($lastNumericKey) ? 0 : $lastNumericKey + 1;\n\n            foreach ($source as $value) {\n                yield $key++ => $value;\n            }\n        });\n    }\n'''
+          if text.count(before) != 1:
+              raise SystemExit('expected concat implementation not found exactly once')
+          path.write_text(text.replace(before, after, 1))
+          PY
+          mapfile -t files < <(git diff --name-only "$BASE_SHA")
+          printf '%s\n' "${files[@]}"
+          test "${#files[@]}" -eq 2
+          test "${files[0]}" = "src/Illuminate/Collections/LazyCollection.php"
+          test "${files[1]}" = "tests/Support/SupportLazyCollectionConcatKeysTest.php"
+          git diff --check
+
+      - name: Set up PHP 8.3 and Composer
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+          tools: composer:v2
+
+      - name: Record PHP 8.3 runtime
+        run: |
+          git rev-parse HEAD
+          php -v
+          composer --version
+
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Run focused concat regression on PHP 8.3
+        run: vendor/bin/phpunit tests/Support/SupportLazyCollectionConcatKeysTest.php
+
+      - name: Run existing concat coverage on PHP 8.3
+        run: vendor/bin/phpunit tests/Support/SupportCollectionTest.php --filter Concat
+
+      - name: Run concat laziness coverage on PHP 8.3
+        run: vendor/bin/phpunit tests/Support/SupportLazyCollectionIsLazyTest.php --filter testConcatIsLazy
+
+      - name: Check formatting
+        run: vendor/bin/pint --test src/Illuminate/Collections/LazyCollection.php tests/Support/SupportLazyCollectionConcatKeysTest.php
+
+      - name: Set up PHP 8.4
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+
+      - name: Record PHP 8.4 runtime
+        run: php -v
+
+      - name: Run focused concat regression on PHP 8.4
+        run: vendor/bin/phpunit tests/Support/SupportLazyCollectionConcatKeysTest.php
+
+      - name: Run existing concat coverage on PHP 8.4
+        run: vendor/bin/phpunit tests/Support/SupportCollectionTest.php --filter Concat
+
+      - name: Run concat laziness coverage on PHP 8.4
+        run: vendor/bin/phpunit tests/Support/SupportLazyCollectionIsLazyTest.php --filter testConcatIsLazy
+
+      - name: Commit and fast-forward preparation branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "refs/heads/$TARGET_BRANCH:refs/remotes/origin/candidate-final"
+          test "$(git rev-parse refs/remotes/origin/candidate-final)" = "$EXPECTED_SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
+          mapfile -t files < <(git diff --name-only "$BASE_SHA")
+          test "${#files[@]}" -eq 2
+          test "${files[0]}" = "src/Illuminate/Collections/LazyCollection.php"
+          test "${files[1]}" = "tests/Support/SupportLazyCollectionConcatKeysTest.php"
+          git diff --check
+          git config user.name "Dijedon"
+          git config user.email "99071957+dijedontahiri@users.noreply.github.com"
+          git add src/Illuminate/Collections/LazyCollection.php
+          git commit -m "fix: preserve keys when lazily concatenating"
+          git push origin "HEAD:refs/heads/$TARGET_BRANCH"
+          echo "PREPARATION_SHA=$(git rev-parse HEAD)"
