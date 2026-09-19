@@ -1,0 +1,39 @@
+name: OSS Laravel validate lazy unique semantics
+
+on:
+  push:
+    branches:
+      - automation/laravel-validate-unique-loose
+
+permissions:
+  contents: read
+
+jobs:
+  baseline:
+    if: github.repository == 'dijedontahiri/framework'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 3d10db690b23e3fc8edebb8ef0dc73c1b8917168
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+          tools: composer:v2
+      - name: Verify exact baseline
+        run: test "$(git rev-parse HEAD)" = "3d10db690b23e3fc8edebb8ef0dc73c1b8917168"
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+      - name: Prove regression fails
+        shell: bash
+        run: |
+          set +e
+          vendor/bin/phpunit tests/Support/SupportLazyCollectionUniqueTest.php > /tmp/result.log 2>&1
+          status=$?
+          cat /tmp/result.log
+          test "$status" -ne 0
+          grep -q "Failed asserting that two arrays are identical" /tmp/result.log
