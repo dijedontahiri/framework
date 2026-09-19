@@ -1,0 +1,152 @@
+name: OSS Laravel R9 collection parity probe
+
+on:
+  push:
+    branches:
+      - automation/laravel-probe-r9
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    if: github.repository == 'dijedontahiri/framework'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout inspected upstream source
+        uses: actions/checkout@v4
+        with:
+          ref: 1d9727160ad440d1ccf2fdcbb7e4f4f36efae212
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+          tools: composer:v2
+      - name: Record runtime
+        run: |
+          test "$(git rev-parse HEAD)" = "1d9727160ad440d1ccf2fdcbb7e4f4f36efae212"
+          php -v
+          composer --version
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+      - name: Run expanded deterministic parity probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/probe.php <<'PHP'
+          <?php
+          require 'vendor/autoload.php';
+
+          use Illuminate\Support\Collection;
+          use Illuminate\Support\Enumerable;
+          use Illuminate\Support\LazyCollection;
+
+          $normalise = static function ($value) use (&$normalise) {
+              if ($value instanceof Enumerable) {
+                  $value = $value->all();
+              }
+              if (is_array($value)) {
+                  foreach ($value as $key => $item) {
+                      $value[$key] = $normalise($item);
+                  }
+              }
+              return $value;
+          };
+
+          $compare = static function (string $label, array $items, callable $call) use ($normalise): ?array {
+              $results = [];
+              foreach ([Collection::class, LazyCollection::class] as $class) {
+                  try {
+                      $results[] = ['ok', $normalise($call(new $class($items)))];
+                  } catch (Throwable $e) {
+                      $results[] = ['exception', get_class($e), $e->getMessage()];
+                  }
+              }
+              return $results[0] === $results[1] ? null : compact('label', 'items', 'results');
+          };
+
+          $cases = [
+              [],
+              [1],
+              [1, 2, 2, 3],
+              [2 => 'a', 5 => 'b', 9 => 'c'],
+              ['a' => 1, 'b' => 2, 'c' => 3],
+              ['a' => 1, 0 => 2, 'b' => 3, 7 => 4],
+              [0, false, null, '', '0', 1],
+          ];
+
+          $mismatches = [];
+          $record = static function ($result) use (&$mismatches) {
+              if ($result !== null) $mismatches[] = $result;
+          };
+
+          foreach ($cases as $items) {
+              $ops = [
+                  'map' => fn ($c) => $c->map(fn ($v, $k) => [$k, $v]),
+                  'mapWithKeys' => fn ($c) => $c->mapWithKeys(fn ($v, $k) => ["k{$k}" => $v]),
+                  'keyBy' => fn ($c) => $c->keyBy(fn ($v, $k) => 'k'.$k),
+                  'groupBy' => fn ($c) => $c->groupBy(fn ($v, $k) => $k % 2),
+                  'partition' => fn ($c) => $c->partition(fn ($v) => (bool) $v),
+                  'reject' => fn ($c) => $c->reject(fn ($v) => $v === null),
+                  'flip' => fn ($c) => $c->flip(),
+                  'unique' => fn ($c) => $c->unique(),
+                  'uniqueStrict' => fn ($c) => $c->uniqueStrict(),
+                  'countBy' => fn ($c) => $c->countBy(fn ($v) => get_debug_type($v).':'.json_encode($v)),
+                  'sortKeys' => fn ($c) => $c->sortKeys(),
+                  'sortKeysDesc' => fn ($c) => $c->sortKeysDesc(),
+                  'only' => fn ($c) => $c->only(['a', 0, 2, 7]),
+                  'except' => fn ($c) => $c->except(['b', 1, 5]),
+                  'skip:2' => fn ($c) => $c->skip(2),
+                  'skip:-2' => fn ($c) => $c->skip(-2),
+                  'take:2' => fn ($c) => $c->take(2),
+                  'take:-2' => fn ($c) => $c->take(-2),
+                  'skipUntil' => fn ($c) => $c->skipUntil(fn ($v, $k) => $k === 2 || $k === 'b'),
+                  'skipWhile' => fn ($c) => $c->skipWhile(fn ($v) => ! $v),
+                  'takeUntil' => fn ($c) => $c->takeUntil(fn ($v, $k) => $k === 2 || $k === 'b'),
+                  'takeWhile' => fn ($c) => $c->takeWhile(fn ($v) => (bool) $v),
+                  'replace' => fn ($c) => $c->replace([0 => 'x', 'b' => 'y']),
+                  'replaceRecursive' => fn ($c) => $c->replaceRecursive([0 => ['x']]),
+                  'merge' => fn ($c) => $c->merge([0 => 'x', 'b' => 'y']),
+                  'mergeRecursive' => fn ($c) => $c->mergeRecursive([0 => 'x', 'b' => 'y']),
+                  'union' => fn ($c) => $c->union([0 => 'x', 'z' => 'y']),
+                  'diff' => fn ($c) => $c->diff([null, 2, 'b']),
+                  'diffAssoc' => fn ($c) => $c->diffAssoc([0 => 1, 'b' => 3]),
+                  'diffKeys' => fn ($c) => $c->diffKeys([0 => true, 'b' => true]),
+                  'intersect' => fn ($c) => $c->intersect([null, 2, 'b']),
+                  'intersectAssoc' => fn ($c) => $c->intersectAssoc([0 => 1, 'b' => 3]),
+                  'intersectByKeys' => fn ($c) => $c->intersectByKeys([0 => true, 'b' => true]),
+                  'prepend' => fn ($c) => $c->prepend('x'),
+                  'prepend-key' => fn ($c) => $c->prepend('x', 'p'),
+                  'chunkWhile' => fn ($c) => $c->chunkWhile(fn ($v, $k, $chunk) => $chunk->isEmpty() || get_debug_type($v) === get_debug_type($chunk->last())),
+              ];
+
+              foreach ($ops as $label => $call) {
+                  $record($compare($label, $items, $call));
+              }
+          }
+
+          $nested = [
+              [['a' => 1], ['b' => 2]],
+              [[1, 2], [3, 4]],
+              ['a' => ['x' => 1], 'b' => ['y' => 2]],
+          ];
+          foreach ($nested as $items) {
+              foreach ([
+                  'collapse' => fn ($c) => $c->collapse(),
+                  'collapseWithKeys' => fn ($c) => $c->collapseWithKeys(),
+                  'flatten:1' => fn ($c) => $c->flatten(1),
+                  'flatten:all' => fn ($c) => $c->flatten(),
+              ] as $label => $call) {
+                  $record($compare($label, $items, $call));
+              }
+          }
+
+          echo json_encode($mismatches, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), PHP_EOL;
+          echo 'MISMATCH_COUNT=', count($mismatches), PHP_EOL;
+          if ($mismatches !== []) exit(3);
+          PHP
+          php /tmp/probe.php
