@@ -12,29 +12,74 @@ jobs:
   lazy-collection-combine:
     if: github.repository == 'dijedontahiri/framework'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
+    env:
+      CANDIDATE_SHA: 25b5168d3558f2ba2137cc11a0235cb7e72bffb8
+      BASE_SHA: 1d9727160ad440d1ccf2fdcbb7e4f4f36efae212
     steps:
-      - name: Checkout exact candidate
+      - name: Checkout exact final candidate
         uses: actions/checkout@v4
         with:
-          ref: 05584e6af46efb31819cf002f621484eb58d8beb
-          fetch-depth: 1
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 3
 
-      - name: Set up PHP
+      - name: Verify exact tree and diff scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git rev-parse HEAD~2)" = "$BASE_SHA"
+          git diff --check "$BASE_SHA..$CANDIDATE_SHA"
+          mapfile -t files < <(git diff --name-only "$BASE_SHA..$CANDIDATE_SHA")
+          printf '%s\n' "${files[@]}"
+          test "${#files[@]}" -eq 2
+          test "${files[0]}" = "src/Illuminate/Collections/LazyCollection.php"
+          test "${files[1]}" = "tests/Support/SupportLazyCollectionCombineTest.php"
+
+      - name: Set up PHP 8.3 and Composer
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.4'
+          php-version: '8.3'
           coverage: none
           tools: composer:v2
 
-      - name: Record runtime and source
+      - name: Record PHP 8.3 runtime and source
         run: |
           git rev-parse HEAD
           php -v
           composer --version
 
-      - name: Install dependencies
+      - name: Install dependencies on PHP 8.3
         run: composer install --no-interaction --no-progress --prefer-dist
 
-      - name: Run combine regression
+      - name: Run focused regression on PHP 8.3
         run: vendor/bin/phpunit tests/Support/SupportLazyCollectionCombineTest.php
+
+      - name: Run existing combine coverage on PHP 8.3
+        run: vendor/bin/phpunit tests/Support/SupportCollectionTest.php --filter Combine
+
+      - name: Run combine laziness coverage on PHP 8.3
+        run: vendor/bin/phpunit tests/Support/SupportLazyCollectionIsLazyTest.php --filter testCombineIsLazy
+
+      - name: Check formatting
+        run: vendor/bin/pint --test src/Illuminate/Collections/LazyCollection.php tests/Support/SupportLazyCollectionCombineTest.php
+
+      - name: Set up PHP 8.4
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+
+      - name: Record PHP 8.4 runtime and source
+        run: |
+          git rev-parse HEAD
+          php -v
+
+      - name: Run focused regression on PHP 8.4
+        run: vendor/bin/phpunit tests/Support/SupportLazyCollectionCombineTest.php
+
+      - name: Run existing combine coverage on PHP 8.4
+        run: vendor/bin/phpunit tests/Support/SupportCollectionTest.php --filter Combine
+
+      - name: Run combine laziness coverage on PHP 8.4
+        run: vendor/bin/phpunit tests/Support/SupportLazyCollectionIsLazyTest.php --filter testCombineIsLazy
