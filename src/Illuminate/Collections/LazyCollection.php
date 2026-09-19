@@ -1736,6 +1736,10 @@ class LazyCollection implements CanBeEscapedWhenCastToString, Enumerable
      */
     public function unique($key = null, $strict = false)
     {
+        if (is_null($key) && $strict === false) {
+            return $this->passthru(__FUNCTION__, func_get_args());
+        }
+
         $callback = $this->valueRetriever($key);
 
         return new static(function () use ($callback, $strict) {
