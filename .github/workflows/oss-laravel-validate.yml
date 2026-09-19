@@ -35,7 +35,7 @@ jobs:
       - name: Install dependencies
         run: composer install --no-interaction --no-progress --prefer-dist
 
-      - name: Extended Collection/LazyCollection differential probe
+      - name: Collection set-operation differential probe
         shell: bash
         run: |
           cat > /tmp/collection_probe.php <<'PHP'
@@ -80,119 +80,67 @@ jobs:
               }
           };
 
-          $scalarCases = [
-              [], [1], [1, 2], [1, 2, 3],
-              ['a' => 1, 'b' => 2, 'c' => 3],
-              [0, false, null, '', '0', 1],
+          $cases = [
+              [],
+              [1],
+              [1, 2, 3],
               [1, 1, 2, 3, 2],
-              ['a' => '10', 'b' => 10, 'c' => '2', 'd' => 2],
+              [0, false, null, '', '0', 1],
+              ['a' => 1, 'b' => 2, 'c' => 3],
+              ['a' => 1, 0 => 2, 'b' => 3, 1 => 4],
+              ['x' => '10', 'y' => 10, 'z' => '2', 'w' => 2],
           ];
 
-          foreach ($scalarCases as $items) {
-              $simple = [
-                  'all' => fn ($c) => $c->all(),
-                  'values' => fn ($c) => $c->values(),
-                  'keys' => fn ($c) => $c->keys(),
-                  'reverse' => fn ($c) => $c->reverse(),
-                  'filter-default' => fn ($c) => $c->filter(),
-                  'filter-callback' => fn ($c) => $c->filter(fn ($v, $k) => (bool) $v),
-                  'reject-callback' => fn ($c) => $c->reject(fn ($v) => $v === null || $v === false),
-                  'map' => fn ($c) => $c->map(fn ($v, $k) => is_numeric($v) ? $v * 2 : $v),
-                  'mapWithKeys' => fn ($c) => $c->mapWithKeys(fn ($v, $k) => ['x'.(string) $k => $v]),
-                  'flatMap' => fn ($c) => $c->flatMap(fn ($v) => [$v, $v]),
-                  'unique' => fn ($c) => $c->unique(),
-                  'uniqueStrict' => fn ($c) => $c->uniqueStrict(),
-                  'duplicates' => fn ($c) => $c->duplicates(),
-                  'duplicatesStrict' => fn ($c) => $c->duplicatesStrict(),
-                  'countBy' => fn ($c) => $c->countBy(),
-                  'sort' => fn ($c) => $c->sort(),
-                  'sortDesc' => fn ($c) => $c->sortDesc(),
-                  'sortKeys' => fn ($c) => $c->sortKeys(),
-                  'sortKeysDesc' => fn ($c) => $c->sortKeysDesc(),
-                  'sum' => fn ($c) => $c->sum(),
-                  'min' => fn ($c) => $c->min(),
-                  'max' => fn ($c) => $c->max(),
-                  'avg' => fn ($c) => $c->avg(),
-                  'median' => fn ($c) => $c->median(),
-                  'mode' => fn ($c) => $c->mode(),
-                  'first' => fn ($c) => $c->first(),
-                  'last' => fn ($c) => $c->last(),
-                  'contains-2' => fn ($c) => $c->contains(2),
-                  'containsStrict-2' => fn ($c) => $c->containsStrict(2),
-                  'search-2' => fn ($c) => $c->search(2),
-                  'searchStrict-2' => fn ($c) => $c->search(2, true),
-                  'has-a' => fn ($c) => $c->has('a'),
-                  'hasAny-a-z' => fn ($c) => $c->hasAny(['a', 'z']),
-                  'get-a' => fn ($c) => $c->get('a', 'fallback'),
-                  'implode-comma' => fn ($c) => $c->implode(','),
-                  'join' => fn ($c) => $c->join(', ', ' and '),
-                  'takeWhile' => fn ($c) => $c->takeWhile(fn ($v) => $v !== null),
-                  'skipWhile' => fn ($c) => $c->skipWhile(fn ($v) => $v !== null),
-                  'takeUntil-null' => fn ($c) => $c->takeUntil(null),
-                  'skipUntil-null' => fn ($c) => $c->skipUntil(null),
-                  'partition' => fn ($c) => $c->partition(fn ($v) => is_numeric($v)),
-                  'groupBy-type' => fn ($c) => $c->groupBy(fn ($v) => get_debug_type($v)),
-                  'keyBy-string' => fn ($c) => $c->keyBy(fn ($v, $k) => 'k'.$k),
-              ];
+          $others = [
+              [], [2, 3, 4], [1, '1', null],
+              ['a' => 9, 'd' => 4],
+              ['x' => 10, 'q' => 99],
+          ];
 
-              foreach ($simple as $label => $call) {
-                  $record($compare($label, $items, $call));
-              }
-
-              foreach ([0, 1, 2, 5] as $n) {
-                  $record($compare("take:$n", $items, fn ($c) => $c->take($n)));
-                  $record($compare("skip:$n", $items, fn ($c) => $c->skip($n)));
-                  $record($compare("slice:$n", $items, fn ($c) => $c->slice($n)));
-              }
-
-              foreach ([1, 2, 3, 5] as $step) {
-                  foreach ([0, 1, 3, 5] as $offset) {
-                      $record($compare("nth:$step:$offset", $items, fn ($c) => $c->nth($step, $offset)));
+          foreach ($cases as $items) {
+              foreach ($others as $other) {
+                  $calls = [
+                      'concat' => fn ($c) => $c->concat($other),
+                      'merge' => fn ($c) => $c->merge($other),
+                      'mergeRecursive' => fn ($c) => $c->mergeRecursive($other),
+                      'union' => fn ($c) => $c->union($other),
+                      'replace' => fn ($c) => $c->replace($other),
+                      'replaceRecursive' => fn ($c) => $c->replaceRecursive($other),
+                      'diff' => fn ($c) => $c->diff($other),
+                      'diffAssoc' => fn ($c) => $c->diffAssoc($other),
+                      'diffKeys' => fn ($c) => $c->diffKeys($other),
+                      'intersect' => fn ($c) => $c->intersect($other),
+                      'intersectAssoc' => fn ($c) => $c->intersectAssoc($other),
+                      'intersectByKeys' => fn ($c) => $c->intersectByKeys($other),
+                  ];
+                  foreach ($calls as $label => $call) {
+                      $record($compare($label.':'.json_encode($other), $items, $call));
                   }
               }
 
-              foreach ([-5, -1, 0, 1, 5] as $size) {
-                  $record($compare("pad:$size", $items, fn ($c) => $c->pad($size, 'x')));
+              foreach ([1, 2, 3, 5] as $size) {
+                  $record($compare("chunk:$size", $items, fn ($c) => $c->chunk($size)));
+                  $record($compare("split:$size", $items, fn ($c) => $c->split($size)));
+                  $record($compare("splitIn:$size", $items, fn ($c) => $c->splitIn($size)));
+                  foreach ([1, 2, 3] as $step) {
+                      $record($compare("sliding:$size:$step", $items, fn ($c) => $c->sliding($size, $step)));
+                  }
               }
+
+              $record($compare('zip:a-b-c-d', $items, fn ($c) => $c->zip(['a', 'b', 'c', 'd'])));
+              $record($compare('crossJoin:x-y', $items, fn ($c) => $c->crossJoin(['x', 'y'])));
+              $record($compare('except:a-1', $items, fn ($c) => $c->except(['a', 1])));
+              $record($compare('only:a-1', $items, fn ($c) => $c->only(['a', 1])));
+              $record($compare('flip', $items, fn ($c) => $c->flip()));
           }
 
-          $recordCases = [
-              [],
-              [['id' => 1, 'name' => 'a', 'active' => true]],
-              [['id' => 1, 'name' => 'a', 'active' => true], ['id' => 2, 'name' => 'b', 'active' => false], ['id' => 3, 'name' => null, 'active' => true]],
-              ['x' => ['id' => 1, 'name' => 'a'], 'y' => ['id' => 2, 'name' => 'b']],
-          ];
-
-          foreach ($recordCases as $items) {
-              $calls = [
-                  'pluck-id' => fn ($c) => $c->pluck('id'),
-                  'pluck-name-id' => fn ($c) => $c->pluck('name', 'id'),
-                  'where-active' => fn ($c) => $c->where('active', true),
-                  'whereStrict-active' => fn ($c) => $c->whereStrict('active', true),
-                  'whereNull-name' => fn ($c) => $c->whereNull('name'),
-                  'whereNotNull-name' => fn ($c) => $c->whereNotNull('name'),
-                  'whereIn-id' => fn ($c) => $c->whereIn('id', [1, 3]),
-                  'whereInStrict-id' => fn ($c) => $c->whereInStrict('id', [1, 3]),
-                  'whereBetween-id' => fn ($c) => $c->whereBetween('id', [1, 2]),
-                  'firstWhere-id' => fn ($c) => $c->firstWhere('id', 2),
-                  'sortBy-id' => fn ($c) => $c->sortBy('id'),
-                  'sortByDesc-id' => fn ($c) => $c->sortByDesc('id'),
-                  'groupBy-active' => fn ($c) => $c->groupBy('active'),
-                  'keyBy-id' => fn ($c) => $c->keyBy('id'),
-              ];
-              foreach ($calls as $label => $call) {
-                  $record($compare($label, $items, $call));
-              }
-          }
-
-          $nestedCases = [
-              [], [[1, 2], [3]], [['a' => 1], ['b' => 2]], [[[1], [2]], [[3]]],
-          ];
-          foreach ($nestedCases as $items) {
-              foreach ([0, 1, 2, 10] as $depth) {
-                  $record($compare("flatten:$depth", $items, fn ($c) => $c->flatten($depth)));
-              }
-              $record($compare('collapse', $items, fn ($c) => $c->collapse()));
+          foreach ([
+              ['keys' => ['a', 'b', 'c'], 'values' => [1, 2, 3]],
+              ['keys' => [1, 2, 3], 'values' => ['a', 'b', 'c']],
+              ['keys' => ['a', 'a'], 'values' => [1, 2]],
+              ['keys' => ['a'], 'values' => [1, 2]],
+          ] as $case) {
+              $record($compare('combine:'.json_encode($case['values']), $case['keys'], fn ($c) => $c->combine($case['values'])));
           }
 
           echo json_encode($mismatches, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), PHP_EOL;
