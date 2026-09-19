@@ -1,0 +1,120 @@
+name: OSS Laravel validation
+
+on:
+  push:
+    branches:
+      - automation/laravel-validation
+
+permissions:
+  contents: read
+
+jobs:
+  differential-collections:
+    if: github.repository == 'dijedontahiri/framework'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout inspected Laravel source
+        uses: actions/checkout@v4
+        with:
+          ref: 1d9727160ad440d1ccf2fdcbb7e4f4f36efae212
+          fetch-depth: 1
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+          tools: composer:v2
+
+      - name: Record runtime
+        run: |
+          php -v
+          composer --version
+
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Differential Collection/LazyCollection probe
+        shell: bash
+        run: |
+          cat > /tmp/collection_probe.php <<'PHP'
+          <?php
+          require 'vendor/autoload.php';
+
+          use Illuminate\Support\Collection;
+          use Illuminate\Support\LazyCollection;
+
+          $cases = [
+              [],
+              [1],
+              [1, 2],
+              [1, 2, 3],
+              ['a' => 1, 'b' => 2, 'c' => 3],
+              [0, false, null, '', '0', 1],
+              [1, 1, 2, 3, 2],
+          ];
+
+          $probes = [];
+          foreach ($cases as $items) {
+              foreach ([-5, -3, -1, 0, 1, 2, 5] as $n) {
+                  $probes[] = ['take', [$n], $items];
+                  $probes[] = ['skip', [$n], $items];
+                  $probes[] = ['slice', [$n], $items];
+                  foreach ([null, -3, -1, 0, 1, 2, 5] as $length) {
+                      if ($length !== null) {
+                          $probes[] = ['slice', [$n, $length], $items];
+                      }
+                  }
+              }
+              foreach ([1, 2, 3, 5] as $size) {
+                  $probes[] = ['chunk', [$size], $items];
+                  $probes[] = ['split', [$size], $items];
+                  foreach ([1, 2, 3, 5] as $step) {
+                      $probes[] = ['sliding', [$size, $step], $items];
+                  }
+              }
+              foreach ([1, 2, 3, 5] as $step) {
+                  foreach ([-3, -1, 0, 1, 3, 5] as $offset) {
+                      $probes[] = ['nth', [$step, $offset], $items];
+                  }
+              }
+              foreach ([-5, -1, 0, 1, 5] as $size) {
+                  $probes[] = ['pad', [$size, 'x'], $items];
+              }
+          }
+
+          $normalise = static function ($value) use (&$normalise) {
+              if ($value instanceof \Illuminate\Support\Enumerable) {
+                  return array_map($normalise, $value->all());
+              }
+              if (is_array($value)) {
+                  foreach ($value as $key => $item) {
+                      $value[$key] = $normalise($item);
+                  }
+              }
+              return $value;
+          };
+
+          $mismatches = [];
+          foreach ($probes as [$method, $args, $items]) {
+              $results = [];
+              foreach ([Collection::class, LazyCollection::class] as $class) {
+                  try {
+                      $result = (new $class($items))->{$method}(...$args);
+                      $results[] = ['ok', $normalise($result)];
+                  } catch (\Throwable $e) {
+                      $results[] = ['exception', get_class($e), $e->getMessage()];
+                  }
+              }
+
+              if ($results[0] !== $results[1]) {
+                  $mismatches[] = compact('method', 'args', 'items', 'results');
+              }
+          }
+
+          echo json_encode($mismatches, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), PHP_EOL;
+          echo 'MISMATCH_COUNT=', count($mismatches), PHP_EOL;
+          PHP
+
+          php /tmp/collection_probe.php
