@@ -1,0 +1,54 @@
+name: Validate lazy collection get key comparison baseline
+
+on:
+  push:
+    branches:
+      - automation/validate-lazy-collection-get-key-comparison-baseline
+
+permissions:
+  contents: read
+
+jobs:
+  baseline:
+    if: github.repository == 'dijedontahiri/framework'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.3', '8.4']
+    steps:
+      - name: Checkout test-only candidate
+        uses: actions/checkout@v4
+        with:
+          ref: 4fc82e7a4ae690998d2a4a7ee0f4295dbaf3f411
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Verify tested source
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "4fc82e7a4ae690998d2a4a7ee0f4295dbaf3f411"
+          test "$(git rev-parse HEAD^)" = "1d9727160ad440d1ccf2fdcbb7e4f4f36efae212"
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+          tools: composer:v2
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+      - name: Prove intended regression failure
+        shell: bash
+        run: |
+          set -euo pipefail
+          php -v
+          composer --version
+          set +e
+          vendor/bin/phpunit tests/Support/SupportLazyCollectionGetTest.php > /tmp/phpunit.out 2>&1
+          status=$?
+          set -e
+          cat /tmp/phpunit.out
+          test "$status" -ne 0
+          grep -q "testGetDoesNotLooselyMatchNumericStringKeys" /tmp/phpunit.out || grep -q "numeric string" /tmp/phpunit.out || true
+          grep -q "1 failure" /tmp/phpunit.out
+          grep -q "Failed asserting that two strings are identical" /tmp/phpunit.out
