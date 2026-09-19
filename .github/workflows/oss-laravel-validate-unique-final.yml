@@ -1,0 +1,42 @@
+name: OSS Laravel validate final lazy unique semantics
+
+on:
+  push:
+    branches:
+      - automation/laravel-validate-unique-loose
+
+permissions:
+  contents: read
+
+jobs:
+  final:
+    if: github.repository == 'dijedontahiri/framework'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.3', '8.4']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: a8007585ecc5044bfca79f90cebfdafb2e928141
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+          tools: composer:v2
+      - name: Verify exact final source
+        run: test "$(git rev-parse HEAD)" = "a8007585ecc5044bfca79f90cebfdafb2e928141"
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+      - name: Validate final candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          vendor/bin/phpunit tests/Support/SupportLazyCollectionUniqueTest.php
+          vendor/bin/phpunit tests/Support/SupportCollectionTest.php --filter Unique
+          vendor/bin/phpunit tests/Support/SupportLazyCollectionIsLazyTest.php --filter Unique
+          vendor/bin/pint --test src/Illuminate/Collections/LazyCollection.php tests/Support/SupportLazyCollectionUniqueTest.php
