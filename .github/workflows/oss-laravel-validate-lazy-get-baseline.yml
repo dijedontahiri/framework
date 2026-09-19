@@ -22,7 +22,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: 4fc82e7a4ae690998d2a4a7ee0f4295dbaf3f411
-          fetch-depth: 1
+          fetch-depth: 2
           persist-credentials: false
       - name: Verify tested source
         run: |
@@ -49,6 +49,5 @@ jobs:
           set -e
           cat /tmp/phpunit.out
           test "$status" -ne 0
-          grep -q "testGetDoesNotLooselyMatchNumericStringKeys" /tmp/phpunit.out || grep -q "numeric string" /tmp/phpunit.out || true
           grep -q "1 failure" /tmp/phpunit.out
           grep -q "Failed asserting that two strings are identical" /tmp/phpunit.out
