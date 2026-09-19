@@ -9,31 +9,37 @@ permissions:
   contents: read
 
 jobs:
-  baseline:
+  final:
     if: github.repository == 'dijedontahiri/framework'
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.3', '8.4']
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 892418206a333f79edff2a25cda61950a36e53fb
+          ref: 3f75fe348cdf3a9452be4729e5808b95c54edadc
           fetch-depth: 1
           persist-credentials: false
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.4'
+          php-version: ${{ matrix.php }}
           coverage: none
           tools: composer:v2
-      - name: Verify exact baseline
-        run: test "$(git rev-parse HEAD)" = "892418206a333f79edff2a25cda61950a36e53fb"
+      - name: Verify exact final source
+        run: |
+          test "$(git rev-parse HEAD)" = "3f75fe348cdf3a9452be4729e5808b95c54edadc"
+          php -v
+          composer --version
       - name: Install dependencies
         run: composer install --no-interaction --no-progress --prefer-dist
-      - name: Prove regression fails
+      - name: Validate final candidate
         shell: bash
         run: |
-          set +e
-          vendor/bin/phpunit tests/Support/SupportLazyCollectionSkipTest.php > /tmp/result.log 2>&1
-          status=$?
-          cat /tmp/result.log
-          test "$status" -ne 0
-          grep -q "Failed asserting that two arrays are identical" /tmp/result.log
+          set -euo pipefail
+          vendor/bin/phpunit tests/Support/SupportLazyCollectionSkipTest.php
+          vendor/bin/phpunit tests/Support/SupportCollectionTest.php --filter Skip
+          vendor/bin/phpunit tests/Support/SupportLazyCollectionIsLazyTest.php --filter Skip
+          vendor/bin/pint --test src/Illuminate/Collections/LazyCollection.php tests/Support/SupportLazyCollectionSkipTest.php
