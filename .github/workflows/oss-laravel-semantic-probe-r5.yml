@@ -1,0 +1,132 @@
+name: OSS Laravel collection semantic probe R5
+
+on:
+  push:
+    branches:
+      - automation/laravel-semantic-probe-r5
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    if: github.repository == 'dijedontahiri/framework'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 1d9727160ad440d1ccf2fdcbb7e4f4f36efae212
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+          tools: composer:v2
+      - name: Verify exact source
+        run: test "$(git rev-parse HEAD)" = "1d9727160ad440d1ccf2fdcbb7e4f4f36efae212"
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+      - name: Differential semantic probe
+        shell: bash
+        run: |
+          cat > /tmp/probe.php <<'PHP'
+          <?php
+          require 'vendor/autoload.php';
+
+          use Illuminate\Support\Collection;
+          use Illuminate\Support\Enumerable;
+          use Illuminate\Support\LazyCollection;
+
+          function norm($v) {
+              if ($v instanceof Enumerable) return ['collection', norm($v->all())];
+              if (is_array($v)) { $r=[]; foreach($v as $k=>$x) $r[$k]=norm($x); return $r; }
+              if (is_object($v)) return ['object', get_class($v), get_object_vars($v)];
+              return [gettype($v), $v];
+          }
+          function out(callable $f) {
+              try { return ['ok', norm($f())]; }
+              catch (Throwable $e) { return ['throw', get_class($e), $e->getMessage()]; }
+          }
+          function compareCase(&$m, $label, $items, callable $f) {
+              $a=out(fn()=>$f(new Collection($items)));
+              $b=out(fn()=>$f(new LazyCollection($items)));
+              if ($a!==$b) $m[]=[$label,$a,$b];
+          }
+
+          $m=[];
+          $keyed=[2=>'a',5=>'b','x'=>'c',10=>'d'];
+          $mixed=[0,false,null,'','0','00',1,'1',true,2.5,'2.5'];
+          $rows=[
+              'a'=>['id'=>1,'group'=>'x','score'=>10],
+              'b'=>['id'=>2,'group'=>'y','score'=>20],
+              'c'=>['id'=>1,'group'=>'x','score'=>30],
+          ];
+          $pairs=[[1,2],[3,4],[5,6]];
+
+          $generic=[
+              'merge'=>fn($c)=>$c->merge([5=>'B','x'=>'X','z'=>'Z']),
+              'mergeRecursive'=>fn($c)=>$c->mergeRecursive([5=>['B'],'x'=>['X'],'z'=>'Z']),
+              'union'=>fn($c)=>$c->union([5=>'B','x'=>'X','z'=>'Z']),
+              'replace'=>fn($c)=>$c->replace([5=>'B','x'=>'X','z'=>'Z']),
+              'replaceRecursive'=>fn($c)=>$c->replaceRecursive([5=>['B'],'x'=>['X'],'z'=>'Z']),
+              'intersectByKeys'=>fn($c)=>$c->intersectByKeys([5=>1,'x'=>1,'z'=>1]),
+              'diffKeys'=>fn($c)=>$c->diffKeys([5=>1,'x'=>1,'z'=>1]),
+              'diffKeysUsing'=>fn($c)=>$c->diffKeysUsing([5=>1,'x'=>1,'z'=>1], fn($a,$b)=>strcmp((string)$a,(string)$b)),
+              'mapWithKeys'=>fn($c)=>$c->mapWithKeys(fn($v,$k)=>[(string)$k.'!' => $v]),
+              'mapToDictionary'=>fn($c)=>$c->mapToDictionary(fn($v,$k)=>[gettype($v)=>$k]),
+              'mapToGroups'=>fn($c)=>$c->mapToGroups(fn($v,$k)=>[gettype($v)=>$k]),
+              'mapSpread'=>fn($c)=>$c->mapSpread(fn(...$v)=>array_sum($v)),
+              'flatMap'=>fn($c)=>$c->flatMap(fn($v,$k)=>[$k=>$v,$k.'x'=>$v]),
+              'prepend'=>fn($c)=>$c->prepend('P','p'),
+              'push'=>fn($c)=>$c->push('P'),
+              'put'=>fn($c)=>$c->put('p','P'),
+              'forget'=>fn($c)=>$c->forget([5,'x']),
+              'pull'=>function($c){$v=$c->pull('x','D');return [$v,$c->all()];},
+              'shift'=>function($c){$v=$c->shift(2);return [$v,$c->all()];},
+              'pop'=>function($c){$v=$c->pop(2);return [$v,$c->all()];},
+              'splice'=>function($c){$v=$c->splice(1,2,['N']);return [$v,$c->all()];},
+              'random1'=>fn($c)=>$c->random(1)->count(),
+              'firstOrFail-ok'=>fn($c)=>$c->firstOrFail(fn($v)=>$v==='b'),
+              'firstOrFail-miss'=>fn($c)=>$c->firstOrFail(fn($v)=>$v==='never'),
+              'sole-ok'=>fn($c)=>$c->sole(fn($v)=>$v==='b'),
+              'sole-miss'=>fn($c)=>$c->sole(fn($v)=>$v==='never'),
+              'containsOneItem'=>fn($c)=>$c->containsOneItem(),
+          ];
+          foreach($generic as $name=>$f) compareCase($m,'keyed/'.$name,$keyed,$f);
+
+          $mixedCases=[
+              'unique'=>fn($c)=>$c->unique(),
+              'uniqueStrict'=>fn($c)=>$c->uniqueStrict(),
+              'duplicates'=>fn($c)=>$c->duplicates(),
+              'duplicatesStrict'=>fn($c)=>$c->duplicatesStrict(),
+              'countBy'=>fn($c)=>$c->countBy(),
+              'frequencies'=>fn($c)=>$c->countBy(fn($v)=>gettype($v).':'.var_export($v,true)),
+          ];
+          foreach($mixedCases as $name=>$f) compareCase($m,'mixed/'.$name,$mixed,$f);
+
+          $rowCases=[
+              'groupBy-array'=>fn($c)=>$c->groupBy(['group','id']),
+              'keyBy-id'=>fn($c)=>$c->keyBy('id'),
+              'sortBy-many'=>fn($c)=>$c->sortBy([['group','asc'],['score','desc']]),
+              'sortBy-callback-array'=>fn($c)=>$c->sortBy([fn($a,$b)=>$b['score']<=>$a['score']]),
+              'pluck-key'=>fn($c)=>$c->pluck('score','id'),
+              'whereBetween'=>fn($c)=>$c->whereBetween('score',[10,20]),
+              'whereNotBetween'=>fn($c)=>$c->whereNotBetween('score',[10,20]),
+              'whereNotIn'=>fn($c)=>$c->whereNotIn('id',[1]),
+              'whereNotInStrict'=>fn($c)=>$c->whereNotInStrict('id',[1]),
+          ];
+          foreach($rowCases as $name=>$f) compareCase($m,'rows/'.$name,$rows,$f);
+
+          $pairCases=[
+              'mapSpread'=>fn($c)=>$c->mapSpread(fn($a,$b)=>$a+$b),
+              'eachSpread'=>function($c){$r=[];$c->eachSpread(function($a,$b)use(&$r){$r[]=$a+$b;});return $r;},
+              'zip'=>fn($c)=>$c->zip([10,20]),
+          ];
+          foreach($pairCases as $name=>$f) compareCase($m,'pairs/'.$name,$pairs,$f);
+
+          echo 'MISMATCH_COUNT='.count($m).PHP_EOL;
+          foreach($m as $x) echo json_encode($x,JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE).PHP_EOL;
+          PHP
+          php /tmp/probe.php
