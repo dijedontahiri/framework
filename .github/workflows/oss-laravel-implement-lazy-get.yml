@@ -1,0 +1,79 @@
+name: Implement lazy collection get key comparison fix
+
+on:
+  push:
+    branches:
+      - automation/implement-lazy-collection-get-key-comparison
+
+permissions:
+  contents: write
+
+jobs:
+  implement:
+    if: github.repository == 'dijedontahiri/framework'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout preparation branch
+        uses: actions/checkout@v4
+        with:
+          ref: automation/fix-lazy-collection-get-key-comparison
+          fetch-depth: 2
+      - name: Verify branch ownership and exact source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "4fc82e7a4ae690998d2a4a7ee0f4295dbaf3f411"
+          test "$(git rev-parse HEAD^)" = "1d9727160ad440d1ccf2fdcbb7e4f4f36efae212"
+          remote_head="$(git ls-remote origin refs/heads/automation/fix-lazy-collection-get-key-comparison | cut -f1)"
+          test "$remote_head" = "4fc82e7a4ae690998d2a4a7ee0f4295dbaf3f411"
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+          tools: composer:v2
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+      - name: Apply minimal correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('src/Illuminate/Collections/LazyCollection.php')
+          text = path.read_text()
+          old = '            if ($outerKey == $key) {\n'
+          new = '            if ($outerKey === $key) {\n'
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f'expected exactly one target, found {count}')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          git diff --check
+          test "$(git diff --numstat -- src/Illuminate/Collections/LazyCollection.php)" = $'1\t1\tsrc/Illuminate/Collections/LazyCollection.php'
+      - name: Run focused and affected tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          php -v
+          composer --version
+          vendor/bin/phpunit tests/Support/SupportLazyCollectionGetTest.php
+          vendor/bin/phpunit tests/Support/SupportLazyCollectionTest.php
+          vendor/bin/pint --test src/Illuminate/Collections/LazyCollection.php tests/Support/SupportLazyCollectionGetTest.php
+      - name: Commit verified preparation
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f composer.lock
+          test -z "$(git status --short | grep -v '^ M src/Illuminate/Collections/LazyCollection.php$' || true)"
+          git diff --check
+          remote_head="$(git ls-remote origin refs/heads/automation/fix-lazy-collection-get-key-comparison | cut -f1)"
+          test "$remote_head" = "4fc82e7a4ae690998d2a4a7ee0f4295dbaf3f411"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/Illuminate/Collections/LazyCollection.php
+          git commit -m 'fix: use exact keys in lazy collection get'
+          git push origin HEAD:refs/heads/automation/fix-lazy-collection-get-key-comparison
+          git rev-parse HEAD
+          git rev-parse HEAD^{tree}
