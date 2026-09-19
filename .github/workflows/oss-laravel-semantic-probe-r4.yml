@@ -1,0 +1,158 @@
+name: OSS Laravel collection semantic probe R4
+
+on:
+  push:
+    branches:
+      - automation/laravel-semantic-probe-r4
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    if: github.repository == 'dijedontahiri/framework'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 1d9727160ad440d1ccf2fdcbb7e4f4f36efae212
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+          tools: composer:v2
+      - name: Verify exact source
+        run: test "$(git rev-parse HEAD)" = "1d9727160ad440d1ccf2fdcbb7e4f4f36efae212"
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+      - name: Differential semantic probe
+        shell: bash
+        run: |
+          cat > /tmp/probe.php <<'PHP'
+          <?php
+          require 'vendor/autoload.php';
+
+          use Illuminate\Support\Collection;
+          use Illuminate\Support\Enumerable;
+          use Illuminate\Support\LazyCollection;
+
+          function normalize($value) {
+              if ($value instanceof Enumerable) {
+                  return ['collection', normalize($value->all())];
+              }
+              if (is_array($value)) {
+                  $out = [];
+                  foreach ($value as $k => $v) $out[$k] = normalize($v);
+                  return $out;
+              }
+              if (is_object($value)) return ['object', get_class($value), get_object_vars($value)];
+              return [gettype($value), $value];
+          }
+
+          function outcome(callable $fn) {
+              try { return ['ok', normalize($fn())]; }
+              catch (Throwable $e) { return ['throw', get_class($e), $e->getMessage()]; }
+          }
+
+          $datasets = [
+              'mixed' => [0, false, null, '', '0', '00', 1, '1', true, 2.5, '2.5'],
+              'keyed' => [2 => 'a', 5 => 'b', 'x' => 'c', 10 => 'a'],
+              'nums' => [3, 1, 2, 1, 0, -1],
+              'rows' => [
+                  'a' => ['id' => 1, 'kind' => 'x', 'v' => null],
+                  'b' => ['id' => 2, 'kind' => 'y', 'v' => 0],
+                  'c' => ['id' => 1, 'kind' => 'x', 'v' => '0'],
+                  'd' => ['id' => 3, 'kind' => 'z', 'v' => false],
+              ],
+              'nested' => [[1,2], [3], [], [4,5]],
+          ];
+
+          $cases = [
+              'search-loose' => fn($c) => $c->search('0', false),
+              'search-strict' => fn($c) => $c->search('0', true),
+              'contains-loose' => fn($c) => $c->contains('0'),
+              'contains-strict' => fn($c) => $c->containsStrict('0'),
+              'flip' => fn($c) => $c->flip(),
+              'countBy' => fn($c) => $c->countBy(),
+              'duplicates' => fn($c) => $c->duplicates(),
+              'duplicatesStrict' => fn($c) => $c->duplicatesStrict(),
+              'sort' => fn($c) => $c->sort(),
+              'sortDesc' => fn($c) => $c->sortDesc(),
+              'reverse' => fn($c) => $c->reverse(),
+              'values' => fn($c) => $c->values(),
+              'keys' => fn($c) => $c->keys(),
+              'takeUntil' => fn($c) => $c->takeUntil(fn($v) => $v === 1),
+              'takeWhile' => fn($c) => $c->takeWhile(fn($v) => $v !== 1),
+              'skipUntil' => fn($c) => $c->skipUntil(fn($v) => $v === 1),
+              'skipWhile' => fn($c) => $c->skipWhile(fn($v) => $v !== 1),
+              'forPage' => fn($c) => $c->forPage(2, 2),
+              'partition' => fn($c) => $c->partition(fn($v) => is_numeric($v)),
+              'chunkWhile' => fn($c) => $c->chunkWhile(fn($v, $k, $chunk) => $chunk->count() < 2),
+              'join' => fn($c) => $c->join('|', ' & '),
+              'implode' => fn($c) => $c->implode('|'),
+              'sum' => fn($c) => $c->sum(),
+              'avg' => fn($c) => $c->avg(),
+              'median' => fn($c) => $c->median(),
+              'mode' => fn($c) => $c->mode(),
+              'min' => fn($c) => $c->min(),
+              'max' => fn($c) => $c->max(),
+              'intersect' => fn($c) => $c->intersect([0, '0', 1]),
+              'intersectStrict' => fn($c) => $c->intersectUsing([0, '0', 1], fn($a,$b) => $a <=> $b),
+              'diff' => fn($c) => $c->diff([0, '0', 1]),
+              'diffAssoc' => fn($c) => $c->diffAssoc([0 => 0, 1 => false]),
+              'except' => fn($c) => $c->except([0, 2, 'x']),
+              'only' => fn($c) => $c->only([0, 2, 'x']),
+              'replace' => fn($c) => $c->replace([0 => 'z', 'x' => 'q']),
+          ];
+
+          $rowCases = [
+              'pluck-id' => fn($c) => $c->pluck('id'),
+              'pluck-id-kind' => fn($c) => $c->pluck('id', 'kind'),
+              'keyBy-kind' => fn($c) => $c->keyBy('kind'),
+              'groupBy-kind' => fn($c) => $c->groupBy('kind'),
+              'mapToDictionary-kind' => fn($c) => $c->mapToDictionary(fn($v) => [$v['kind'] => $v['id']]),
+              'where-id-loose' => fn($c) => $c->where('id', 1),
+              'where-v-zero' => fn($c) => $c->where('v', 0),
+              'whereStrict-v-zero' => fn($c) => $c->whereStrict('v', 0),
+              'whereIn-v' => fn($c) => $c->whereIn('v', [0]),
+              'whereInStrict-v' => fn($c) => $c->whereInStrict('v', [0]),
+              'whereNull-v' => fn($c) => $c->whereNull('v'),
+              'whereNotNull-v' => fn($c) => $c->whereNotNull('v'),
+              'sortBy-id' => fn($c) => $c->sortBy('id'),
+              'sortByDesc-id' => fn($c) => $c->sortByDesc('id'),
+              'unique-id' => fn($c) => $c->unique('id'),
+              'uniqueStrict-id' => fn($c) => $c->uniqueStrict('id'),
+          ];
+
+          $nestedCases = [
+              'collapse' => fn($c) => $c->collapse(),
+              'flatten-1' => fn($c) => $c->flatten(1),
+              'flatMap' => fn($c) => $c->flatMap(fn($v) => $v),
+          ];
+
+          $mismatches = [];
+          foreach (['mixed','keyed','nums'] as $d) {
+              foreach ($cases as $name => $fn) {
+                  $a = outcome(fn() => $fn(new Collection($datasets[$d])));
+                  $b = outcome(fn() => $fn(new LazyCollection($datasets[$d])));
+                  if ($a !== $b) $mismatches[] = [$d, $name, $a, $b];
+              }
+          }
+          foreach ($rowCases as $name => $fn) {
+              $a = outcome(fn() => $fn(new Collection($datasets['rows'])));
+              $b = outcome(fn() => $fn(new LazyCollection($datasets['rows'])));
+              if ($a !== $b) $mismatches[] = ['rows', $name, $a, $b];
+          }
+          foreach ($nestedCases as $name => $fn) {
+              $a = outcome(fn() => $fn(new Collection($datasets['nested'])));
+              $b = outcome(fn() => $fn(new LazyCollection($datasets['nested'])));
+              if ($a !== $b) $mismatches[] = ['nested', $name, $a, $b];
+          }
+
+          echo 'MISMATCH_COUNT='.count($mismatches).PHP_EOL;
+          foreach ($mismatches as $m) echo json_encode($m, JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE).PHP_EOL;
+          PHP
+          php /tmp/probe.php
