@@ -1024,10 +1024,23 @@ class LazyCollection implements CanBeEscapedWhenCastToString, Enumerable
      */
     public function concat($source)
     {
-        return (new static(function () use ($source) {
-            yield from $this;
-            yield from $source;
-        }))->values();
+        return new static(function () use ($source) {
+            $lastNumericKey = null;
+
+            foreach ($this as $key => $value) {
+                yield $key => $value;
+
+                if (is_int($key) && (is_null($lastNumericKey) || $key > $lastNumericKey)) {
+                    $lastNumericKey = $key;
+                }
+            }
+
+            $key = is_null($lastNumericKey) ? 0 : $lastNumericKey + 1;
+
+            foreach ($source as $value) {
+                yield $key++ => $value;
+            }
+        });
     }
 
     /**
