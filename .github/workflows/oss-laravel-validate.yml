@@ -35,7 +35,7 @@ jobs:
       - name: Install dependencies
         run: composer install --no-interaction --no-progress --prefer-dist
 
-      - name: Differential Collection/LazyCollection probe
+      - name: Extended Collection/LazyCollection differential probe
         shell: bash
         run: |
           cat > /tmp/collection_probe.php <<'PHP'
@@ -43,78 +43,163 @@ jobs:
           require 'vendor/autoload.php';
 
           use Illuminate\Support\Collection;
+          use Illuminate\Support\Enumerable;
           use Illuminate\Support\LazyCollection;
 
-          $cases = [
-              [],
-              [1],
-              [1, 2],
-              [1, 2, 3],
-              ['a' => 1, 'b' => 2, 'c' => 3],
-              [0, false, null, '', '0', 1],
-              [1, 1, 2, 3, 2],
-          ];
-
-          $probes = [];
-          foreach ($cases as $items) {
-              foreach ([-5, -3, -1, 0, 1, 2, 5] as $n) {
-                  $probes[] = ['take', [$n], $items];
-                  $probes[] = ['skip', [$n], $items];
-                  $probes[] = ['slice', [$n], $items];
-                  foreach ([null, -3, -1, 0, 1, 2, 5] as $length) {
-                      if ($length !== null) {
-                          $probes[] = ['slice', [$n, $length], $items];
-                      }
-                  }
-              }
-              foreach ([1, 2, 3, 5] as $size) {
-                  $probes[] = ['chunk', [$size], $items];
-                  $probes[] = ['split', [$size], $items];
-                  foreach ([1, 2, 3, 5] as $step) {
-                      $probes[] = ['sliding', [$size, $step], $items];
-                  }
-              }
-              foreach ([1, 2, 3, 5] as $step) {
-                  foreach ([-3, -1, 0, 1, 3, 5] as $offset) {
-                      $probes[] = ['nth', [$step, $offset], $items];
-                  }
-              }
-              foreach ([-5, -1, 0, 1, 5] as $size) {
-                  $probes[] = ['pad', [$size, 'x'], $items];
-              }
-          }
-
           $normalise = static function ($value) use (&$normalise) {
-              if ($value instanceof \Illuminate\Support\Enumerable) {
-                  return array_map($normalise, $value->all());
+              if ($value instanceof Enumerable) {
+                  $value = $value->all();
               }
               if (is_array($value)) {
                   foreach ($value as $key => $item) {
                       $value[$key] = $normalise($item);
                   }
               }
+              if (is_object($value)) {
+                  return ['__class' => get_class($value), '__vars' => get_object_vars($value)];
+              }
               return $value;
           };
 
-          $mismatches = [];
-          foreach ($probes as [$method, $args, $items]) {
+          $compare = static function (string $label, array $items, callable $call) use ($normalise): ?array {
               $results = [];
               foreach ([Collection::class, LazyCollection::class] as $class) {
                   try {
-                      $result = (new $class($items))->{$method}(...$args);
-                      $results[] = ['ok', $normalise($result)];
+                      $results[] = ['ok', $normalise($call(new $class($items)))];
                   } catch (\Throwable $e) {
                       $results[] = ['exception', get_class($e), $e->getMessage()];
                   }
               }
+              return $results[0] === $results[1] ? null : compact('label', 'items', 'results');
+          };
 
-              if ($results[0] !== $results[1]) {
-                  $mismatches[] = compact('method', 'args', 'items', 'results');
+          $mismatches = [];
+          $record = static function ($value) use (&$mismatches) {
+              if ($value !== null) {
+                  $mismatches[] = $value;
               }
+          };
+
+          $scalarCases = [
+              [], [1], [1, 2], [1, 2, 3],
+              ['a' => 1, 'b' => 2, 'c' => 3],
+              [0, false, null, '', '0', 1],
+              [1, 1, 2, 3, 2],
+              ['a' => '10', 'b' => 10, 'c' => '2', 'd' => 2],
+          ];
+
+          foreach ($scalarCases as $items) {
+              $simple = [
+                  'all' => fn ($c) => $c->all(),
+                  'values' => fn ($c) => $c->values(),
+                  'keys' => fn ($c) => $c->keys(),
+                  'reverse' => fn ($c) => $c->reverse(),
+                  'filter-default' => fn ($c) => $c->filter(),
+                  'filter-callback' => fn ($c) => $c->filter(fn ($v, $k) => (bool) $v),
+                  'reject-callback' => fn ($c) => $c->reject(fn ($v) => $v === null || $v === false),
+                  'map' => fn ($c) => $c->map(fn ($v, $k) => is_numeric($v) ? $v * 2 : $v),
+                  'mapWithKeys' => fn ($c) => $c->mapWithKeys(fn ($v, $k) => ['x'.(string) $k => $v]),
+                  'flatMap' => fn ($c) => $c->flatMap(fn ($v) => [$v, $v]),
+                  'unique' => fn ($c) => $c->unique(),
+                  'uniqueStrict' => fn ($c) => $c->uniqueStrict(),
+                  'duplicates' => fn ($c) => $c->duplicates(),
+                  'duplicatesStrict' => fn ($c) => $c->duplicatesStrict(),
+                  'countBy' => fn ($c) => $c->countBy(),
+                  'sort' => fn ($c) => $c->sort(),
+                  'sortDesc' => fn ($c) => $c->sortDesc(),
+                  'sortKeys' => fn ($c) => $c->sortKeys(),
+                  'sortKeysDesc' => fn ($c) => $c->sortKeysDesc(),
+                  'sum' => fn ($c) => $c->sum(),
+                  'min' => fn ($c) => $c->min(),
+                  'max' => fn ($c) => $c->max(),
+                  'avg' => fn ($c) => $c->avg(),
+                  'median' => fn ($c) => $c->median(),
+                  'mode' => fn ($c) => $c->mode(),
+                  'first' => fn ($c) => $c->first(),
+                  'last' => fn ($c) => $c->last(),
+                  'contains-2' => fn ($c) => $c->contains(2),
+                  'containsStrict-2' => fn ($c) => $c->containsStrict(2),
+                  'search-2' => fn ($c) => $c->search(2),
+                  'searchStrict-2' => fn ($c) => $c->search(2, true),
+                  'has-a' => fn ($c) => $c->has('a'),
+                  'hasAny-a-z' => fn ($c) => $c->hasAny(['a', 'z']),
+                  'get-a' => fn ($c) => $c->get('a', 'fallback'),
+                  'implode-comma' => fn ($c) => $c->implode(','),
+                  'join' => fn ($c) => $c->join(', ', ' and '),
+                  'takeWhile' => fn ($c) => $c->takeWhile(fn ($v) => $v !== null),
+                  'skipWhile' => fn ($c) => $c->skipWhile(fn ($v) => $v !== null),
+                  'takeUntil-null' => fn ($c) => $c->takeUntil(null),
+                  'skipUntil-null' => fn ($c) => $c->skipUntil(null),
+                  'partition' => fn ($c) => $c->partition(fn ($v) => is_numeric($v)),
+                  'groupBy-type' => fn ($c) => $c->groupBy(fn ($v) => get_debug_type($v)),
+                  'keyBy-string' => fn ($c) => $c->keyBy(fn ($v, $k) => 'k'.$k),
+              ];
+
+              foreach ($simple as $label => $call) {
+                  $record($compare($label, $items, $call));
+              }
+
+              foreach ([0, 1, 2, 5] as $n) {
+                  $record($compare("take:$n", $items, fn ($c) => $c->take($n)));
+                  $record($compare("skip:$n", $items, fn ($c) => $c->skip($n)));
+                  $record($compare("slice:$n", $items, fn ($c) => $c->slice($n)));
+              }
+
+              foreach ([1, 2, 3, 5] as $step) {
+                  foreach ([0, 1, 3, 5] as $offset) {
+                      $record($compare("nth:$step:$offset", $items, fn ($c) => $c->nth($step, $offset)));
+                  }
+              }
+
+              foreach ([-5, -1, 0, 1, 5] as $size) {
+                  $record($compare("pad:$size", $items, fn ($c) => $c->pad($size, 'x')));
+              }
+          }
+
+          $recordCases = [
+              [],
+              [['id' => 1, 'name' => 'a', 'active' => true]],
+              [['id' => 1, 'name' => 'a', 'active' => true], ['id' => 2, 'name' => 'b', 'active' => false], ['id' => 3, 'name' => null, 'active' => true]],
+              ['x' => ['id' => 1, 'name' => 'a'], 'y' => ['id' => 2, 'name' => 'b']],
+          ];
+
+          foreach ($recordCases as $items) {
+              $calls = [
+                  'pluck-id' => fn ($c) => $c->pluck('id'),
+                  'pluck-name-id' => fn ($c) => $c->pluck('name', 'id'),
+                  'where-active' => fn ($c) => $c->where('active', true),
+                  'whereStrict-active' => fn ($c) => $c->whereStrict('active', true),
+                  'whereNull-name' => fn ($c) => $c->whereNull('name'),
+                  'whereNotNull-name' => fn ($c) => $c->whereNotNull('name'),
+                  'whereIn-id' => fn ($c) => $c->whereIn('id', [1, 3]),
+                  'whereInStrict-id' => fn ($c) => $c->whereInStrict('id', [1, 3]),
+                  'whereBetween-id' => fn ($c) => $c->whereBetween('id', [1, 2]),
+                  'firstWhere-id' => fn ($c) => $c->firstWhere('id', 2),
+                  'sortBy-id' => fn ($c) => $c->sortBy('id'),
+                  'sortByDesc-id' => fn ($c) => $c->sortByDesc('id'),
+                  'groupBy-active' => fn ($c) => $c->groupBy('active'),
+                  'keyBy-id' => fn ($c) => $c->keyBy('id'),
+              ];
+              foreach ($calls as $label => $call) {
+                  $record($compare($label, $items, $call));
+              }
+          }
+
+          $nestedCases = [
+              [], [[1, 2], [3]], [['a' => 1], ['b' => 2]], [[[1], [2]], [[3]]],
+          ];
+          foreach ($nestedCases as $items) {
+              foreach ([0, 1, 2, 10] as $depth) {
+                  $record($compare("flatten:$depth", $items, fn ($c) => $c->flatten($depth)));
+              }
+              $record($compare('collapse', $items, fn ($c) => $c->collapse()));
           }
 
           echo json_encode($mismatches, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), PHP_EOL;
           echo 'MISMATCH_COUNT=', count($mismatches), PHP_EOL;
+          if ($mismatches !== []) {
+              exit(3);
+          }
           PHP
 
           php /tmp/collection_probe.php
