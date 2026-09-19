@@ -1,0 +1,133 @@
+name: OSS Laravel extended collection parity probe
+
+on:
+  push:
+    branches:
+      - automation/laravel-probe-r10
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    if: github.repository == 'dijedontahiri/framework'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout inspected upstream source
+        uses: actions/checkout@v4
+        with:
+          ref: 1d9727160ad440d1ccf2fdcbb7e4f4f36efae212
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+          tools: composer:v2
+      - name: Record runtime
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "1d9727160ad440d1ccf2fdcbb7e4f4f36efae212"
+          php -v
+          composer --version
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+      - name: Run extended deterministic parity probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/probe.php <<'PHP'
+          <?php
+          require 'vendor/autoload.php';
+
+          use Illuminate\Support\Collection;
+          use Illuminate\Support\Enumerable;
+          use Illuminate\Support\LazyCollection;
+
+          $normalise = static function ($value) use (&$normalise) {
+              if ($value instanceof Enumerable) {
+                  $value = $value->all();
+              }
+              if (is_array($value)) {
+                  foreach ($value as $key => $item) {
+                      $value[$key] = $normalise($item);
+                  }
+              }
+              return $value;
+          };
+
+          $compare = static function (string $label, array $items, callable $call) use ($normalise): ?array {
+              $results = [];
+              foreach ([Collection::class, LazyCollection::class] as $class) {
+                  try {
+                      $results[] = ['ok', $normalise($call(new $class($items)))];
+                  } catch (Throwable $e) {
+                      $results[] = ['exception', get_class($e), $e->getMessage()];
+                  }
+              }
+              return $results[0] === $results[1] ? null : compact('label', 'items', 'results');
+          };
+
+          $cases = [
+              [],
+              [1],
+              [1, 2, 3, 4],
+              [2 => 'a', 5 => 'b', 9 => 'c'],
+              ['a' => 1, 'b' => 2, 'c' => 1],
+              ['a' => 1, 0 => 2, 'b' => 1, 7 => 3],
+              [0, false, null, '', '0', 1, true],
+              ['10', 10, '2', 2, 1.0, 1],
+          ];
+
+          $mismatches = [];
+          $record = static function ($result) use (&$mismatches) {
+              if ($result !== null) $mismatches[] = $result;
+          };
+
+          foreach ($cases as $items) {
+              $record($compare('only', $items, fn ($c) => $c->only(['a', 0, 5])));
+              $record($compare('except', $items, fn ($c) => $c->except(['a', 0, 5])));
+              $record($compare('intersect', $items, fn ($c) => $c->intersect([1, '1', 2, 'a'])));
+              $record($compare('intersectStrict', $items, fn ($c) => $c->intersectUsing([1, '1', 2, 'a'], fn ($a, $b) => $a <=> $b)));
+              $record($compare('intersectByKeys', $items, fn ($c) => $c->intersectByKeys(['a' => 9, 0 => 9, 5 => 9])));
+              $record($compare('diff', $items, fn ($c) => $c->diff([1, '1', 2, 'a'])));
+              $record($compare('diffAssoc', $items, fn ($c) => $c->diffAssoc(['a' => 1, 0 => 1, 5 => 'b'])));
+              $record($compare('diffKeys', $items, fn ($c) => $c->diffKeys(['a' => 9, 0 => 9, 5 => 9])));
+              $record($compare('union', $items, fn ($c) => $c->union(['a' => 99, 0 => 88, 'z' => 77])));
+              $record($compare('merge', $items, fn ($c) => $c->merge(['a' => 99, 0 => 88, 'z' => 77])));
+              $record($compare('replace', $items, fn ($c) => $c->replace(['a' => 99, 0 => 88, 'z' => 77])));
+              $record($compare('flip', $items, fn ($c) => $c->flip()));
+              $record($compare('sortKeys', $items, fn ($c) => $c->sortKeys()));
+              $record($compare('sortKeysDesc', $items, fn ($c) => $c->sortKeysDesc()));
+              $record($compare('countBy', $items, fn ($c) => $c->countBy(fn ($v) => is_scalar($v) || $v === null ? gettype($v).':'.var_export($v, true) : gettype($v))));
+              $record($compare('duplicates', $items, fn ($c) => $c->duplicates()));
+              $record($compare('duplicatesStrict', $items, fn ($c) => $c->duplicatesStrict()));
+              $record($compare('keyBy', $items, fn ($c) => $c->keyBy(fn ($v, $k) => 'k'.(is_int($k) ? $k % 2 : strlen((string) $k) % 2))));
+              $record($compare('groupBy', $items, fn ($c) => $c->groupBy(fn ($v, $k) => is_int($k) ? $k % 2 : strlen((string) $k) % 2)));
+              $record($compare('mapWithKeys', $items, fn ($c) => $c->mapWithKeys(fn ($v, $k) => ['x'.(string) $k => $v])));
+              $record($compare('mapToGroups', $items, fn ($c) => $c->mapToGroups(fn ($v, $k) => ['g'.(is_int($k) ? $k % 2 : 0) => $v])));
+              $record($compare('takeWhile', $items, fn ($c) => $c->takeWhile(fn ($v) => $v !== 2)));
+              $record($compare('takeUntil', $items, fn ($c) => $c->takeUntil(fn ($v) => $v === 2)));
+              $record($compare('skipWhile', $items, fn ($c) => $c->skipWhile(fn ($v) => $v !== 2)));
+              $record($compare('skipUntil', $items, fn ($c) => $c->skipUntil(fn ($v) => $v === 2)));
+              $record($compare('chunkWhile', $items, fn ($c) => $c->chunkWhile(fn ($v, $k, $chunk) => $chunk->isEmpty() || gettype($v) === gettype($chunk->last()))));
+          }
+
+          $structured = [
+              [['id' => 1, 'name' => 'a'], ['id' => 2, 'name' => 'b'], ['id' => 3, 'name' => 'a']],
+              ['x' => ['id' => 1, 'name' => 'a'], 'y' => ['id' => 2, 'name' => 'b']],
+          ];
+          foreach ($structured as $items) {
+              $record($compare('pluck-name', $items, fn ($c) => $c->pluck('name')));
+              $record($compare('pluck-name-id', $items, fn ($c) => $c->pluck('name', 'id')));
+              $record($compare('groupBy-name', $items, fn ($c) => $c->groupBy('name')));
+              $record($compare('keyBy-id', $items, fn ($c) => $c->keyBy('id')));
+          }
+
+          echo json_encode($mismatches, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), PHP_EOL;
+          echo 'MISMATCH_COUNT=', count($mismatches), PHP_EOL;
+          if ($mismatches !== []) exit(3);
+          PHP
+          php /tmp/probe.php
