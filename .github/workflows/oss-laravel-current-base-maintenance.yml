@@ -27,8 +27,8 @@ jobs:
           - name: concat
             candidate: 46d967cf1e689b30c41d91b3a1e011578293a7c6
             old_base: 1d9727160ad440d1ccf2fdcbb7e4f4f36efae212
-            test_file: tests/Support/SupportLazyCollectionConcatTest.php
-            expected_test: tests/Support/SupportLazyCollectionConcatTest.php
+            test_file: tests/Support/SupportLazyCollectionConcatKeysTest.php
+            expected_test: tests/Support/SupportLazyCollectionConcatKeysTest.php
             extra1: vendor/bin/phpunit tests/Support/SupportCollectionTest.php --filter Concat
             extra2: vendor/bin/phpunit tests/Support/SupportLazyCollectionIsLazyTest.php --filter testConcatIsLazy
           - name: pad
