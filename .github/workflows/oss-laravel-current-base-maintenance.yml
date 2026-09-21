@@ -1,0 +1,136 @@
+name: OSS Laravel current-base maintenance
+
+on:
+  push:
+    branches:
+      - automation/laravel-maintenance-r9-20260921
+
+permissions:
+  contents: read
+
+jobs:
+  verify-preparation:
+    if: github.repository == 'dijedontahiri/framework'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: combine
+            candidate: 25b5168d3558f2ba2137cc11a0235cb7e72bffb8
+            old_base: 1d9727160ad440d1ccf2fdcbb7e4f4f36efae212
+            test_file: tests/Support/SupportLazyCollectionCombineTest.php
+            expected_test: tests/Support/SupportLazyCollectionCombineTest.php
+            extra1: vendor/bin/phpunit tests/Support/SupportCollectionTest.php --filter Combine
+            extra2: vendor/bin/phpunit tests/Support/SupportLazyCollectionIsLazyTest.php --filter testCombineIsLazy
+          - name: concat
+            candidate: 46d967cf1e689b30c41d91b3a1e011578293a7c6
+            old_base: 1d9727160ad440d1ccf2fdcbb7e4f4f36efae212
+            test_file: tests/Support/SupportLazyCollectionConcatTest.php
+            expected_test: tests/Support/SupportLazyCollectionConcatTest.php
+            extra1: vendor/bin/phpunit tests/Support/SupportCollectionTest.php --filter Concat
+            extra2: vendor/bin/phpunit tests/Support/SupportLazyCollectionIsLazyTest.php --filter testConcatIsLazy
+          - name: pad
+            candidate: 997e019a0ad73ad3368d47d019a53eb7409b9eb9
+            old_base: 1d9727160ad440d1ccf2fdcbb7e4f4f36efae212
+            test_file: tests/Support/SupportLazyCollectionPadTest.php
+            expected_test: tests/Support/SupportLazyCollectionPadTest.php
+            extra1: vendor/bin/phpunit tests/Support/SupportCollectionTest.php --filter Pad
+            extra2: vendor/bin/phpunit tests/Support/SupportLazyCollectionIsLazyTest.php --filter testPadIsLazy
+          - name: unique
+            candidate: a8007585ecc5044bfca79f90cebfdafb2e928141
+            old_base: 1d9727160ad440d1ccf2fdcbb7e4f4f36efae212
+            test_file: tests/Support/SupportLazyCollectionUniqueTest.php
+            expected_test: tests/Support/SupportLazyCollectionUniqueTest.php
+            extra1: vendor/bin/phpunit tests/Support/SupportCollectionTest.php --filter Unique
+            extra2: vendor/bin/phpunit tests/Support/SupportLazyCollectionIsLazyTest.php --filter Unique
+          - name: get
+            candidate: 28f795c8235f32c06e97ef00e8ec17f375e64fed
+            old_base: 1d9727160ad440d1ccf2fdcbb7e4f4f36efae212
+            test_file: tests/Support/SupportLazyCollectionGetTest.php
+            expected_test: tests/Support/SupportLazyCollectionGetTest.php
+            extra1: vendor/bin/phpunit tests/Support/SupportLazyCollectionTest.php
+            extra2: ':'
+    env:
+      CURRENT_BASE: 606f3594d5a319d38a7c5dd45cad1233ff648c72
+      CANDIDATE_SHA: ${{ matrix.candidate }}
+      OLD_BASE: ${{ matrix.old_base }}
+      EXPECTED_TEST: ${{ matrix.expected_test }}
+      FOCUSED_TEST: ${{ matrix.test_file }}
+      EXTRA1: ${{ matrix.extra1 }}
+      EXTRA2: ${{ matrix.extra2 }}
+    steps:
+      - name: Checkout exact current 13.x base
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CURRENT_BASE }}
+          fetch-depth: 1
+
+      - name: Apply only the isolated candidate diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CURRENT_BASE"
+          git fetch origin "$CANDIDATE_SHA" --depth=3
+          test "$(git rev-parse "$CANDIDATE_SHA~2")" = "$OLD_BASE"
+          mapfile -t files < <(git diff --name-only "$OLD_BASE..$CANDIDATE_SHA")
+          printf 'candidate=%s\nbase=%s\nfiles:\n' "$CANDIDATE_SHA" "$CURRENT_BASE"
+          printf '%s\n' "${files[@]}"
+          test "${#files[@]}" -eq 2
+          test "${files[0]}" = "src/Illuminate/Collections/LazyCollection.php"
+          test "${files[1]}" = "$EXPECTED_TEST"
+          git diff --binary "$OLD_BASE..$CANDIDATE_SHA" > /tmp/candidate.patch
+          git apply --check /tmp/candidate.patch
+          git apply --index /tmp/candidate.patch
+          git diff --cached --check
+          echo "APPLIED_TREE=$(git write-tree)" >> "$GITHUB_ENV"
+
+      - name: Set up PHP 8.3 and Composer
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+          tools: composer:v2
+
+      - name: Record PHP 8.3 environment
+        run: |
+          php -v
+          composer --version
+          echo "candidate=$CANDIDATE_SHA"
+          echo "current_base=$CURRENT_BASE"
+          echo "applied_tree=$APPLIED_TREE"
+
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Run focused and related tests on PHP 8.3
+        shell: bash
+        run: |
+          set -euo pipefail
+          vendor/bin/phpunit "$FOCUSED_TEST"
+          eval "$EXTRA1"
+          eval "$EXTRA2"
+          vendor/bin/pint --test src/Illuminate/Collections/LazyCollection.php "$EXPECTED_TEST"
+
+      - name: Set up PHP 8.4
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+
+      - name: Record PHP 8.4 environment
+        run: |
+          php -v
+          composer --version
+          echo "candidate=$CANDIDATE_SHA"
+          echo "current_base=$CURRENT_BASE"
+          echo "applied_tree=$APPLIED_TREE"
+
+      - name: Run focused and related tests on PHP 8.4
+        shell: bash
+        run: |
+          set -euo pipefail
+          vendor/bin/phpunit "$FOCUSED_TEST"
+          eval "$EXTRA1"
+          eval "$EXTRA2"
