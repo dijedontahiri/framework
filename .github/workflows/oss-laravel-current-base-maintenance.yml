@@ -53,7 +53,7 @@ jobs:
             extra1: vendor/bin/phpunit tests/Support/SupportLazyCollectionTest.php
             extra2: ':'
     env:
-      CURRENT_BASE: 606f3594d5a319d38a7c5dd45cad1233ff648c72
+      CURRENT_BASE: f7c6b5d10bb974b4b827d180aaaecb9240415994
       CANDIDATE_SHA: ${{ matrix.candidate }}
       OLD_BASE: ${{ matrix.old_base }}
       EXPECTED_TEST: ${{ matrix.expected_test }}
