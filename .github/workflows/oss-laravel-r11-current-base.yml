@@ -1,0 +1,145 @@
+name: OSS Laravel current-base candidate validation
+
+on:
+  push:
+    branches:
+      - automation/laravel-validation-r11
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    if: github.repository == 'dijedontahiri/framework'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: combine-count-mismatch
+            candidate_branch: automation/fix-lazy-collection-combine-mismatch
+            candidate_sha: 25b5168d3558f2ba2137cc11a0235cb7e72bffb8
+            test_file: tests/Support/SupportLazyCollectionCombineTest.php
+          - name: concat-key-preservation
+            candidate_branch: automation/fix-lazy-collection-concat-keys
+            candidate_sha: 46d967cf1e689b30c41d91b3a1e011578293a7c6
+            test_file: tests/Support/SupportLazyCollectionConcatKeysTest.php
+          - name: pad-sparse-keys
+            candidate_branch: automation/fix-lazy-collection-pad-sparse-keys
+            candidate_sha: 997e019a0ad73ad3368d47d019a53eb7409b9eb9
+            test_file: tests/Support/SupportLazyCollectionPadTest.php
+          - name: unique-loose-semantics
+            candidate_branch: automation/fix-lazy-collection-unique-loose-semantics
+            candidate_sha: a8007585ecc5044bfca79f90cebfdafb2e928141
+            test_file: tests/Support/SupportLazyCollectionUniqueTest.php
+          - name: get-exact-key-comparison
+            candidate_branch: automation/fix-lazy-collection-get-key-comparison
+            candidate_sha: 28f795c8235f32c06e97ef00e8ec17f375e64fed
+            test_file: tests/Support/SupportLazyCollectionGetTest.php
+    env:
+      CURRENT_BASE: 5ff93f4ffbe653fe2ef72b572e5e0e5e6cfebd9d
+      ORIGINAL_BASE: 1d9727160ad440d1ccf2fdcbb7e4f4f36efae212
+      SOURCE_FILE: src/Illuminate/Collections/LazyCollection.php
+      CANDIDATE_BRANCH: ${{ matrix.candidate_branch }}
+      CANDIDATE_SHA: ${{ matrix.candidate_sha }}
+      TEST_FILE: ${{ matrix.test_file }}
+    steps:
+      - name: Checkout exact current 13.x base
+        uses: actions/checkout@v4
+        with:
+          ref: 5ff93f4ffbe653fe2ef72b572e5e0e5e6cfebd9d
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up PHP 8.3
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+          extensions: ctype, filter, hash, mbstring, openssl, session, tokenizer, gmp
+          tools: composer:v2
+
+      - name: Preflight runtime and candidate ancestry
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CURRENT_BASE"
+          php -v
+          composer --version
+          df -h .
+          git fetch --no-tags --depth=3 origin "refs/heads/$CANDIDATE_BRANCH:refs/remotes/origin/oss-candidate"
+          candidate="$(git rev-parse refs/remotes/origin/oss-candidate)"
+          test "$candidate" = "$CANDIDATE_SHA"
+          test "$(git rev-parse "$candidate~2")" = "$ORIGINAL_BASE"
+          test_commit="$(git rev-parse "$candidate^")"
+          test "$(git diff --name-only "$ORIGINAL_BASE" "$test_commit")" = "$TEST_FILE"
+          actual_files="$(git diff --name-only "$ORIGINAL_BASE" "$candidate" | sort)"
+          expected_files="$(printf '%s\n%s\n' "$SOURCE_FILE" "$TEST_FILE" | sort)"
+          test "$actual_files" = "$expected_files"
+          printf 'candidate=%s\ntest_commit=%s\n' "$candidate" "$test_commit"
+
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Prove regression on current base
+        shell: bash
+        run: |
+          set -euo pipefail
+          test_commit="$(git rev-parse "$CANDIDATE_SHA^")"
+          git diff --binary "$ORIGINAL_BASE" "$test_commit" -- "$TEST_FILE" > /tmp/baseline.patch
+          test -s /tmp/baseline.patch
+          git apply --check /tmp/baseline.patch
+          git apply --index /tmp/baseline.patch
+          git diff --cached --check
+          set +e
+          vendor/bin/phpunit "$TEST_FILE" > /tmp/baseline.log 2>&1
+          code=$?
+          set -e
+          cat /tmp/baseline.log
+          test "$code" -ne 0
+          grep -Eiq 'fail|failed|failure|failures|error' /tmp/baseline.log
+
+      - name: Apply exact candidate diff to current base
+        shell: bash
+        run: |
+          set -euo pipefail
+          git reset --hard "$CURRENT_BASE"
+          git clean -fd
+          git diff --binary "$ORIGINAL_BASE" "$CANDIDATE_SHA" -- "$SOURCE_FILE" "$TEST_FILE" > /tmp/candidate.patch
+          test -s /tmp/candidate.patch
+          git apply --check /tmp/candidate.patch
+          git apply --index /tmp/candidate.patch
+          git diff --cached --check
+          actual_files="$(git diff --cached --name-only | sort)"
+          expected_files="$(printf '%s\n%s\n' "$SOURCE_FILE" "$TEST_FILE" | sort)"
+          test "$actual_files" = "$expected_files"
+          printf 'Applied tree: '
+          git write-tree
+
+      - name: Test exact candidate on PHP 8.3
+        shell: bash
+        run: |
+          set -euo pipefail
+          vendor/bin/phpunit "$TEST_FILE"
+          vendor/bin/phpunit tests/Support/SupportCollectionTest.php
+          vendor/bin/phpunit tests/Support/SupportLazyCollectionIsLazyTest.php
+          vendor/bin/pint --test "$SOURCE_FILE" "$TEST_FILE"
+
+      - name: Set up PHP 8.4
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+          extensions: ctype, filter, hash, mbstring, openssl, session, tokenizer, gmp
+          tools: composer:v2
+
+      - name: Re-test exact candidate on PHP 8.4
+        shell: bash
+        run: |
+          set -euo pipefail
+          php -v
+          composer --version
+          vendor/bin/phpunit "$TEST_FILE"
+          vendor/bin/phpunit tests/Support/SupportCollectionTest.php
+          vendor/bin/phpunit tests/Support/SupportLazyCollectionIsLazyTest.php
