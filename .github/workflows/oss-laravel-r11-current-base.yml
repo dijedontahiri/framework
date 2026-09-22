@@ -38,7 +38,7 @@ jobs:
             candidate_sha: 28f795c8235f32c06e97ef00e8ec17f375e64fed
             test_file: tests/Support/SupportLazyCollectionGetTest.php
     env:
-      CURRENT_BASE: 5ff93f4ffbe653fe2ef72b572e5e0e5e6cfebd9d
+      CURRENT_BASE: a9cf9996942ff525e63f5c6b789466f4749bb996
       ORIGINAL_BASE: 1d9727160ad440d1ccf2fdcbb7e4f4f36efae212
       SOURCE_FILE: src/Illuminate/Collections/LazyCollection.php
       CANDIDATE_BRANCH: ${{ matrix.candidate_branch }}
@@ -48,7 +48,7 @@ jobs:
       - name: Checkout exact current 13.x base
         uses: actions/checkout@v4
         with:
-          ref: 5ff93f4ffbe653fe2ef72b572e5e0e5e6cfebd9d
+          ref: a9cf9996942ff525e63f5c6b789466f4749bb996
           fetch-depth: 1
           persist-credentials: false
 
@@ -135,6 +135,24 @@ jobs:
           tools: composer:v2
 
       - name: Re-test exact candidate on PHP 8.4
+        shell: bash
+        run: |
+          set -euo pipefail
+          php -v
+          composer --version
+          vendor/bin/phpunit "$TEST_FILE"
+          vendor/bin/phpunit tests/Support/SupportCollectionTest.php
+          vendor/bin/phpunit tests/Support/SupportLazyCollectionIsLazyTest.php
+
+      - name: Set up PHP 8.5
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          coverage: none
+          extensions: ctype, filter, hash, mbstring, openssl, session, tokenizer, gmp
+          tools: composer:v2
+
+      - name: Re-test exact candidate on PHP 8.5
         shell: bash
         run: |
           set -euo pipefail
