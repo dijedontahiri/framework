@@ -38,7 +38,7 @@ jobs:
             candidate_sha: 28f795c8235f32c06e97ef00e8ec17f375e64fed
             test_file: tests/Support/SupportLazyCollectionGetTest.php
     env:
-      CURRENT_BASE: 175092939c403bc3e7af07a0cfe12e9fa7946148
+      CURRENT_BASE: 06cdbaea9f1165de0d75ba5f46d781143250ef80
       ORIGINAL_BASE: 1d9727160ad440d1ccf2fdcbb7e4f4f36efae212
       SOURCE_FILE: src/Illuminate/Collections/LazyCollection.php
       CANDIDATE_BRANCH: ${{ matrix.candidate_branch }}
@@ -48,7 +48,7 @@ jobs:
       - name: Checkout exact current 13.x base
         uses: actions/checkout@v4
         with:
-          ref: 175092939c403bc3e7af07a0cfe12e9fa7946148
+          ref: 06cdbaea9f1165de0d75ba5f46d781143250ef80
           fetch-depth: 1
           persist-credentials: false
 
