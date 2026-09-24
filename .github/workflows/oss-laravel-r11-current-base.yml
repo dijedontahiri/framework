@@ -17,29 +17,34 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: combine-count-mismatch
-            candidate_branch: automation/fix-lazy-collection-combine-mismatch
-            candidate_sha: 25b5168d3558f2ba2137cc11a0235cb7e72bffb8
-            test_file: tests/Support/SupportLazyCollectionCombineTest.php
+          - name: lazy-map-unary-internal-callable
+            candidate_branch: automation/laravel-61693-lazy-map-unary-callable
+            candidate_sha: fc13e132a287f91f671b06ffa3877ae74500ac20
+            original_base: 06cdbaea9f1165de0d75ba5f46d781143250ef80
+            test_file: tests/Support/SupportLazyCollectionMapInternalCallableTest.php
           - name: concat-key-preservation
             candidate_branch: automation/fix-lazy-collection-concat-keys
             candidate_sha: 46d967cf1e689b30c41d91b3a1e011578293a7c6
+            original_base: 1d9727160ad440d1ccf2fdcbb7e4f4f36efae212
             test_file: tests/Support/SupportLazyCollectionConcatKeysTest.php
           - name: pad-sparse-keys
             candidate_branch: automation/fix-lazy-collection-pad-sparse-keys
             candidate_sha: 997e019a0ad73ad3368d47d019a53eb7409b9eb9
+            original_base: 1d9727160ad440d1ccf2fdcbb7e4f4f36efae212
             test_file: tests/Support/SupportLazyCollectionPadTest.php
           - name: unique-loose-semantics
             candidate_branch: automation/fix-lazy-collection-unique-loose-semantics
             candidate_sha: a8007585ecc5044bfca79f90cebfdafb2e928141
+            original_base: 1d9727160ad440d1ccf2fdcbb7e4f4f36efae212
             test_file: tests/Support/SupportLazyCollectionUniqueTest.php
           - name: get-exact-key-comparison
             candidate_branch: automation/fix-lazy-collection-get-key-comparison
             candidate_sha: 28f795c8235f32c06e97ef00e8ec17f375e64fed
+            original_base: 1d9727160ad440d1ccf2fdcbb7e4f4f36efae212
             test_file: tests/Support/SupportLazyCollectionGetTest.php
     env:
       CURRENT_BASE: 06cdbaea9f1165de0d75ba5f46d781143250ef80
-      ORIGINAL_BASE: 1d9727160ad440d1ccf2fdcbb7e4f4f36efae212
+      ORIGINAL_BASE: ${{ matrix.original_base }}
       SOURCE_FILE: src/Illuminate/Collections/LazyCollection.php
       CANDIDATE_BRANCH: ${{ matrix.candidate_branch }}
       CANDIDATE_SHA: ${{ matrix.candidate_sha }}
