@@ -1,152 +1,63 @@
-name: OSS Laravel scalar and filter collection parity probe
-
+name: OSS Laravel semantic parity probe R12
 on:
   push:
-    branches:
-      - automation/laravel-probe-r11
-
+    branches: [automation/laravel-probe-r11]
 permissions:
   contents: read
-
 jobs:
   probe:
     if: github.repository == 'dijedontahiri/framework'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: Checkout inspected upstream source
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
-          ref: 1d9727160ad440d1ccf2fdcbb7e4f4f36efae212
+          ref: 5841965e11a09fc9777836793d94423b9039739f
           fetch-depth: 1
           persist-credentials: false
-      - name: Set up PHP
-        uses: shivammathur/setup-php@v2
+      - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.4'
           coverage: none
           tools: composer:v2
-      - name: Install dependencies
-        run: composer install --no-interaction --no-progress --prefer-dist
-      - name: Run deterministic parity probe
+      - run: composer install --no-interaction --no-progress --prefer-dist
+      - name: Probe
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "1d9727160ad440d1ccf2fdcbb7e4f4f36efae212"
-          php -v
-          composer --version
+          test "$(git rev-parse HEAD)" = "5841965e11a09fc9777836793d94423b9039739f"
           cat > /tmp/probe.php <<'PHP'
           <?php
           require 'vendor/autoload.php';
-
           use Illuminate\Support\Collection;
           use Illuminate\Support\Enumerable;
           use Illuminate\Support\LazyCollection;
-
-          $normalise = static function ($value) use (&$normalise) {
-              if ($value instanceof Enumerable) $value = $value->all();
-              if (is_array($value)) {
-                  foreach ($value as $key => $item) $value[$key] = $normalise($item);
-              }
-              return $value;
-          };
-
-          $compare = static function (string $label, array $items, callable $call) use ($normalise): ?array {
-              $results = [];
-              foreach ([Collection::class, LazyCollection::class] as $class) {
-                  try {
-                      $results[] = ['ok', $normalise($call(new $class($items)))];
-                  } catch (Throwable $e) {
-                      $results[] = ['exception', get_class($e), $e->getMessage()];
-                  }
-              }
-              return $results[0] === $results[1] ? null : compact('label', 'items', 'results');
-          };
-
-          $cases = [
-              [],
-              [1],
-              [1, 2, 3, 4],
-              [2 => 1, 5 => 2, 9 => 3],
-              ['a' => 1, 'b' => 2, 'c' => 1],
-              ['a' => 1, 0 => 2, 'b' => 1, 7 => 3],
-              [0, false, null, '', '0', 1, true],
-              ['10', 10, '2', 2, 1.0, 1],
-          ];
-
-          $mismatches = [];
-          $record = static function ($r) use (&$mismatches) { if ($r !== null) $mismatches[] = $r; };
-
-          foreach ($cases as $items) {
-              $ops = [
-                  'contains-value' => fn ($c) => $c->contains(1),
-                  'contains-strict' => fn ($c) => $c->containsStrict(1),
-                  'contains-callback' => fn ($c) => $c->contains(fn ($v, $k) => $v === 2),
-                  'search-loose' => fn ($c) => $c->search(1),
-                  'search-strict' => fn ($c) => $c->search(1, true),
-                  'search-callback' => fn ($c) => $c->search(fn ($v) => $v === 2),
-                  'first' => fn ($c) => $c->first(),
-                  'first-callback' => fn ($c) => $c->first(fn ($v) => $v === 2, 'fallback'),
-                  'last' => fn ($c) => $c->last(),
-                  'last-callback' => fn ($c) => $c->last(fn ($v) => $v === 2, 'fallback'),
-                  'min' => fn ($c) => $c->min(),
-                  'max' => fn ($c) => $c->max(),
-                  'sum' => fn ($c) => $c->sum(),
-                  'avg' => fn ($c) => $c->avg(),
-                  'median' => fn ($c) => $c->median(),
-                  'mode' => fn ($c) => $c->mode(),
-                  'percentage' => fn ($c) => $c->percentage(fn ($v) => $v == 1),
-                  'reduce' => fn ($c) => $c->reduce(fn ($carry, $v) => $carry + (is_numeric($v) ? $v : 0), 0),
-                  'implode' => fn ($c) => $c->implode('|'),
-                  'join' => fn ($c) => $c->join(', ', ' and '),
-                  'filter' => fn ($c) => $c->filter(fn ($v) => (bool) $v),
-                  'reject' => fn ($c) => $c->reject(fn ($v) => (bool) $v),
-                  'where-loose' => fn ($c) => $c->where(null, 1),
-                  'where-strict' => fn ($c) => $c->whereStrict(null, 1),
-                  'where-in' => fn ($c) => $c->whereIn(null, [1, 2]),
-                  'where-in-strict' => fn ($c) => $c->whereInStrict(null, [1, 2]),
-                  'where-not-in' => fn ($c) => $c->whereNotIn(null, [1, 2]),
-                  'where-not-in-strict' => fn ($c) => $c->whereNotInStrict(null, [1, 2]),
-                  'partition' => fn ($c) => $c->partition(fn ($v) => (bool) $v),
-                  'replace-recursive' => fn ($c) => $c->replaceRecursive(['a' => 99, 0 => 88, 5 => 77]),
-                  'merge-recursive' => fn ($c) => $c->mergeRecursive(['a' => 99, 0 => 88, 5 => 77]),
-                  'flatten-0' => fn ($c) => $c->flatten(0),
-                  'flatten-1' => fn ($c) => $c->flatten(1),
-                  'flatten-inf' => fn ($c) => $c->flatten(),
-              ];
-              foreach ($ops as $label => $op) $record($compare($label, $items, $op));
+          function norm($v){if($v instanceof Enumerable)return ['c',norm($v->all())];if(is_array($v)){foreach($v as $k=>$x)$v[$k]=norm($x);return $v;}if(is_object($v))return ['o',$v::class,get_object_vars($v)];return [gettype($v),$v];}
+          function cap($f){try{return ['ok',norm($f())];}catch(Throwable $e){return ['throw',$e::class,$e->getMessage()];}}
+          function cmp(&$m,$l,$a,$b){$x=cap($a);$y=cap($b);if($x!==$y)$m[]=[$l,$x,$y];}
+          $m=[];
+          $sets=['empty'=>[],'seq'=>[1,2,3,4],'sparse'=>[2=>'a',5=>'b',9=>'c'],'assoc'=>[''=>10,'01'=>20,'a'=>30,7=>40],'mixed'=>[0,false,null,'','0',1,true,'1',1.0]];
+          foreach($sets as $n=>$i){
+            cmp($m,"$n/only-null",fn()=>(new Collection($i))->only(null),fn()=>(new LazyCollection($i))->only(null));
+            cmp($m,"$n/has-null",fn()=>(new Collection($i))->has(null),fn()=>(new LazyCollection($i))->has(null));
+            cmp($m,"$n/hasAny-null",fn()=>(new Collection($i))->hasAny(null),fn()=>(new LazyCollection($i))->hasAny(null));
+            cmp($m,"$n/get-null",fn()=>(new Collection($i))->get(null,'fallback'),fn()=>(new LazyCollection($i))->get(null,'fallback'));
+            cmp($m,"$n/before-false",fn()=>(new Collection($i))->before(false),fn()=>(new LazyCollection($i))->before(false));
+            cmp($m,"$n/after-false",fn()=>(new Collection($i))->after(false),fn()=>(new LazyCollection($i))->after(false));
+            cmp($m,"$n/containsMany-callback",fn()=>(new Collection($i))->containsManyItems(fn($v)=>$v===1),fn()=>(new LazyCollection($i))->containsManyItems(fn($v)=>$v===1));
+            cmp($m,"$n/mapWithKeys-generator",fn()=>(new Collection($i))->mapWithKeys(function($v,$k){yield 'x'.$k=>$v;}),fn()=>(new LazyCollection($i))->mapWithKeys(function($v,$k){yield 'x'.$k=>$v;}));
           }
-
-          $nested = [
-              [[1, 2], [3, 4]],
-              ['x' => [1, 2], 'y' => [3, 4]],
-              [['a' => 1, 'b' => 2], ['a' => 3, 'b' => 4]],
-          ];
-          foreach ($nested as $items) {
-              $record($compare('mapSpread', $items, fn ($c) => $c->mapSpread(fn (...$values) => implode(':', $values))));
-              $record($compare('eachSpread-return', $items, function ($c) { $seen = []; $c->eachSpread(function (...$v) use (&$seen) { $seen[] = $v; }); return $seen; }));
-              $record($compare('collapse', $items, fn ($c) => $c->collapse()));
-              $record($compare('flatten-1-nested', $items, fn ($c) => $c->flatten(1)));
-          }
-
-          $structured = [
-              [['id' => 1, 'score' => 10], ['id' => 2, 'score' => 20], ['id' => 3, 'score' => 10]],
-              ['x' => ['id' => 1, 'score' => 10], 'y' => ['id' => 2, 'score' => 20]],
-          ];
-          foreach ($structured as $items) {
-              $record($compare('min-score', $items, fn ($c) => $c->min('score')));
-              $record($compare('max-score', $items, fn ($c) => $c->max('score')));
-              $record($compare('sum-score', $items, fn ($c) => $c->sum('score')));
-              $record($compare('avg-score', $items, fn ($c) => $c->avg('score')));
-              $record($compare('median-score', $items, fn ($c) => $c->median('score')));
-              $record($compare('mode-score', $items, fn ($c) => $c->mode('score')));
-              $record($compare('where-score', $items, fn ($c) => $c->where('score', 10)));
-              $record($compare('where-between', $items, fn ($c) => $c->whereBetween('score', [10, 15])));
-              $record($compare('where-not-between', $items, fn ($c) => $c->whereNotBetween('score', [10, 15])));
-          }
-
-          echo json_encode($mismatches, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), PHP_EOL;
-          echo 'MISMATCH_COUNT=', count($mismatches), PHP_EOL;
-          if ($mismatches !== []) exit(3);
+          $rows=[['id'=>1,'name'=>'a'],['id'=>2,'name'=>'b']];
+          cmp($m,'pluck-value-closure',fn()=>(new Collection($rows))->pluck(fn($x)=>$x['name']),fn()=>(new LazyCollection($rows))->pluck(fn($x)=>$x['name']));
+          cmp($m,'pluck-key-closure',fn()=>(new Collection($rows))->pluck('name',fn($x)=>'k'.$x['id']),fn()=>(new LazyCollection($rows))->pluck('name',fn($x)=>'k'.$x['id']));
+          $nested=[['a'=>1,2=>'x'],['a'=>2,5=>'y','b'=>3]];
+          cmp($m,'collapse-mixed-keys',fn()=>(new Collection($nested))->collapse(),fn()=>(new LazyCollection($nested))->collapse());
+          cmp($m,'collapseWithKeys-mixed-keys',fn()=>(new Collection($nested))->collapseWithKeys(),fn()=>(new LazyCollection($nested))->collapseWithKeys());
+          $nl=[new LazyCollection(['a'=>1]),new LazyCollection(['b'=>2])];
+          cmp($m,'collapse-nested-lazy',fn()=>(new Collection($nl))->collapse(),fn()=>(new LazyCollection($nl))->collapse());
+          cmp($m,'collapseWithKeys-nested-lazy',fn()=>(new Collection($nl))->collapseWithKeys(),fn()=>(new LazyCollection($nl))->collapseWithKeys());
+          echo json_encode($m,JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES),PHP_EOL;
+          echo 'MISMATCH_COUNT=',count($m),PHP_EOL;
+          if($m!==[])exit(3);
           PHP
           php /tmp/probe.php
