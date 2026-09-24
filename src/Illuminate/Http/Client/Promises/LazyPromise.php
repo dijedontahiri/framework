@@ -44,39 +44,23 @@ class LazyPromise implements PromiseInterface
             throw new RuntimeException('Promise already built');
         }
 
-        $this->guzzlePromise = call_user_func($this->promiseBuilder);
-
-        foreach ($this->pending as $pendingCallback) {
-            $pendingCallback($this->guzzlePromise);
-        }
-
-        $this->pending = [];
-
-        return $this->guzzlePromise;
+        return $this->setGuzzlePromise(call_user_func($this->promiseBuilder));
     }
 
     #[\Override]
     public function then(?callable $onFulfilled = null, ?callable $onRejected = null): PromiseInterface
     {
-        if ($this->promiseNeedsBuilt()) {
-            $this->pending[] = static fn (PromiseInterface $promise) => $promise->then($onFulfilled, $onRejected);
-
-            return $this;
-        }
-
-        return $this->guzzlePromise->then($onFulfilled, $onRejected);
+        return $this->chain(
+            fn (PromiseInterface $promise) => $promise->then($onFulfilled, $onRejected)
+        );
     }
 
     #[\Override]
     public function otherwise(callable $onRejected): PromiseInterface
     {
-        if ($this->promiseNeedsBuilt()) {
-            $this->pending[] = static fn (PromiseInterface $promise) => $promise->otherwise($onRejected);
-
-            return $this;
-        }
-
-        return $this->guzzlePromise->otherwise($onRejected);
+        return $this->chain(
+            fn (PromiseInterface $promise) => $promise->otherwise($onRejected)
+        );
     }
 
     #[\Override]
@@ -125,5 +109,55 @@ class LazyPromise implements PromiseInterface
     public function promiseNeedsBuilt(): bool
     {
         return ! isset($this->guzzlePromise);
+    }
+
+    /**
+     * Create an independent promise chained from this promise.
+     *
+     * @param  \Closure(\GuzzleHttp\Promise\PromiseInterface): \GuzzleHttp\Promise\PromiseInterface  $callback
+     * @return \GuzzleHttp\Promise\PromiseInterface
+     */
+    protected function chain(Closure $callback): PromiseInterface
+    {
+        $nextPromise = null;
+
+        $nextPromise = new static(function () use (&$nextPromise) {
+            if ($this->promiseNeedsBuilt()) {
+                $this->buildPromise();
+            }
+
+            return $nextPromise->guzzlePromise;
+        });
+
+        $pendingCallback = static function (PromiseInterface $promise) use ($callback, $nextPromise) {
+            $nextPromise->setGuzzlePromise($callback($promise));
+        };
+
+        if ($this->promiseNeedsBuilt()) {
+            $this->pending[] = $pendingCallback;
+        } else {
+            $pendingCallback($this->guzzlePromise);
+        }
+
+        return $nextPromise;
+    }
+
+    /**
+     * Set the built Guzzle promise and attach pending child promises.
+     *
+     * @param  \GuzzleHttp\Promise\PromiseInterface  $promise
+     * @return \GuzzleHttp\Promise\PromiseInterface
+     */
+    protected function setGuzzlePromise(PromiseInterface $promise): PromiseInterface
+    {
+        $this->guzzlePromise = $promise;
+
+        foreach ($this->pending as $pendingCallback) {
+            $pendingCallback($this->guzzlePromise);
+        }
+
+        $this->pending = [];
+
+        return $this->guzzlePromise;
     }
 }

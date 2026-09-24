@@ -24,13 +24,13 @@ class FluentPromise implements PromiseInterface
     #[\Override]
     public function then(?callable $onFulfilled = null, ?callable $onRejected = null): PromiseInterface
     {
-        return $this->__call('then', [$onFulfilled, $onRejected]);
+        return new static($this->guzzlePromise->then($onFulfilled, $onRejected));
     }
 
     #[\Override]
     public function otherwise(callable $onRejected): PromiseInterface
     {
-        return $this->__call('otherwise', [$onRejected]);
+        return new static($this->guzzlePromise->otherwise($onRejected));
     }
 
     #[\Override]
