@@ -1,0 +1,43 @@
+name: OSS Laravel candidate check
+on:
+  push:
+    branches:
+      - automation/laravel-validation-r12
+permissions:
+  contents: read
+jobs:
+  test:
+    if: github.repository == 'dijedontahiri/framework'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: 4c1430b46f37cfe2bb95a183d06bdaa798913618
+          persist-credentials: false
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+          tools: composer:v2
+      - run: composer install --no-interaction --no-progress --prefer-dist
+      - run: vendor/bin/phpunit tests/Support/SupportLazyCollectionMapInternalCallableTest.php
+      - run: vendor/bin/phpunit tests/Support/SupportCollectionTest.php
+      - run: vendor/bin/phpunit tests/Support/SupportLazyCollectionIsLazyTest.php
+      - run: vendor/bin/pint --test src/Illuminate/Collections/LazyCollection.php tests/Support/SupportLazyCollectionMapInternalCallableTest.php
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+          tools: composer:v2
+      - run: vendor/bin/phpunit tests/Support/SupportLazyCollectionMapInternalCallableTest.php
+      - run: vendor/bin/phpunit tests/Support/SupportCollectionTest.php
+      - run: vendor/bin/phpunit tests/Support/SupportLazyCollectionIsLazyTest.php
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          coverage: none
+          tools: composer:v2
+      - run: vendor/bin/phpunit tests/Support/SupportLazyCollectionMapInternalCallableTest.php
+      - run: vendor/bin/phpunit tests/Support/SupportCollectionTest.php
+      - run: vendor/bin/phpunit tests/Support/SupportLazyCollectionIsLazyTest.php
