@@ -810,7 +810,11 @@ class LazyCollection implements CanBeEscapedWhenCastToString, Enumerable
     {
         return new static(function () use ($callback) {
             foreach ($this as $key => $value) {
-                yield $key => $callback($value, $key);
+                try {
+                    yield $key => $callback($value, $key);
+                } catch (\ArgumentCountError) {
+                    yield $key => $callback($value);
+                }
             }
         });
     }
