@@ -1,4 +1,4 @@
-name: OSS Laravel candidate baseline
+name: OSS Laravel candidate check
 on:
   push:
     branches:
@@ -9,11 +9,11 @@ jobs:
   test:
     if: github.repository == 'dijedontahiri/framework'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: f09a4f8998580e11ac7154632e150e87056a1183
+          ref: 2bbd3282b97b924dc745ae2d4e97532fe7d0e7a5
           persist-credentials: false
       - uses: shivammathur/setup-php@v2
         with:
@@ -21,4 +21,23 @@ jobs:
           coverage: none
           tools: composer:v2
       - run: composer install --no-interaction --no-progress --prefer-dist
-      - run: vendor/bin/phpunit tests/Support/SupportLazyCollectionPadTest.php
+      - run: vendor/bin/phpunit tests/Support/SupportLazyCollectionGetTest.php
+      - run: vendor/bin/phpunit tests/Support/SupportCollectionTest.php
+      - run: vendor/bin/phpunit tests/Support/SupportLazyCollectionIsLazyTest.php
+      - run: vendor/bin/pint --test src/Illuminate/Collections/LazyCollection.php tests/Support/SupportLazyCollectionGetTest.php
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+          tools: composer:v2
+      - run: vendor/bin/phpunit tests/Support/SupportLazyCollectionGetTest.php
+      - run: vendor/bin/phpunit tests/Support/SupportCollectionTest.php
+      - run: vendor/bin/phpunit tests/Support/SupportLazyCollectionIsLazyTest.php
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          coverage: none
+          tools: composer:v2
+      - run: vendor/bin/phpunit tests/Support/SupportLazyCollectionGetTest.php
+      - run: vendor/bin/phpunit tests/Support/SupportCollectionTest.php
+      - run: vendor/bin/phpunit tests/Support/SupportLazyCollectionIsLazyTest.php
