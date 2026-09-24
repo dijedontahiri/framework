@@ -1842,15 +1842,16 @@ class LazyCollection implements CanBeEscapedWhenCastToString, Enumerable
 
         return new static(function () use ($size, $value) {
             $yielded = 0;
+            $numericIndex = 0;
 
             foreach ($this as $index => $item) {
-                yield $index => $item;
+                yield is_int($index) ? $numericIndex++ : $index => $item;
 
                 $yielded++;
             }
 
             while ($yielded++ < $size) {
-                yield $value;
+                yield $numericIndex++ => $value;
             }
         });
     }
