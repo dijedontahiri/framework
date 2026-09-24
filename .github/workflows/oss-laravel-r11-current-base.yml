@@ -51,7 +51,7 @@ jobs:
       TEST_FILE: ${{ matrix.test_file }}
     steps:
       - name: Checkout exact current 13.x base
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: 06cdbaea9f1165de0d75ba5f46d781143250ef80
           fetch-depth: 1
