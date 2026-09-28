@@ -580,6 +580,8 @@ class LazyCollection implements CanBeEscapedWhenCastToString, Enumerable
                     $resolvedKey = (string) $resolvedKey;
                 }
 
+                $resolvedKey = array_key_first([$resolvedKey => null]);
+
                 yield $resolvedKey => $item;
             }
         });
